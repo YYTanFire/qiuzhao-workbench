@@ -1,0 +1,29 @@
+{
+  "name": "qiuzhao-workbench",
+  "version": "2.0.0",
+  "description": "秋招作战台 v2 —— 面向 2027 届校招求职者的一站式求职工作台（岗位发现 / 简历定制 / 经历深挖 / 面试准备 / 复盘沉淀）",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node server/seed.js",
+    "sync": "node server/sync.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "keywords": [
+    "campus-recruitment",
+    "job-search",
+    "workbench",
+    "fullstack"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "mammoth": "^1.12.3",
+    "node-cron": "^3.0.3",
+    "pdf-parse": "^2.4.5"
+  }
+}
