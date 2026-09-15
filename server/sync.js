@@ -196,7 +196,7 @@ function normalizeFeishu(rec, idx) {
   };
 }
 
-/** 读取本地飞书缓存（data/feishu-jobs.json，由 import-feishu.js 刷新）并标准化 */
+/** 读取本地飞书缓存（data/feishu-jobs.json，由 refreshFeishuCache 刷新）并标准化 */
 function loadFeishuCache() {
   try {
     const fs = require('fs');
@@ -208,6 +208,43 @@ function loadFeishuCache() {
   } catch (e) {
     console.warn('[同步] 飞书缓存读取失败:', e.message);
     return null;
+  }
+}
+
+/** 从飞书多维表格分页拉取一页（异步，不阻塞事件循环） */
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+const execFileP = promisify(execFile);
+const FEISHU_BASE_TOKEN = 'S96LbTe5janAapsVxicchqHnnDQ';
+const FEISHU_TABLE_ID = 'tbl2fptglpEwS8zp';
+
+async function feishuPage(offset, limit) {
+  const { stdout } = await execFileP('lark-cli', ['base', '+record-list', '--base-token', FEISHU_BASE_TOKEN, '--table-id', FEISHU_TABLE_ID, '--format', 'json', '--limit', String(limit), '--offset', String(offset), '--as', 'user'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return JSON.parse(stdout);
+}
+
+/**
+ * 刷新飞书源缓存：从用户「校招汇总表（优先）」重新拉取全量记录写回 data/feishu-jobs.json。
+ * 供每日自动同步与 import-feishu.js 使用；失败时沿用旧缓存，不中断同步。
+ */
+async function refreshFeishuCache() {
+  try {
+    const first = await feishuPage(0, 200);
+    const fields = first.data.fields.map((name, i) => ({ name, id: first.data.field_id_list[i] }));
+    const records = [...first.data.data];
+    let offset = records.length;
+    while (first.data.has_more) {
+      const p = await feishuPage(offset, 200);
+      records.push(...p.data.data);
+      offset += p.data.data.length;
+      if (!p.data.has_more) break;
+    }
+    require('fs').writeFileSync(FEISHU_CACHE, JSON.stringify({ fields, records }, null, 1), 'utf8');
+    console.log(`[飞书源] 已自动拉取最新记录：${records.length} 条`);
+    return records.length;
+  } catch (e) {
+    console.warn(`[飞书源] 自动拉取失败，沿用本地旧缓存: ${e.message}`);
+    return 0;
   }
 }
 
@@ -281,9 +318,12 @@ function upsertJob(r, now) {
   return 'added';
 }
 
-/** 执行一次同步 */
-async function runSyncOnce() {
+/** 执行一次同步；opts.refreshFeishu=true 时先从飞书多维表格重新拉取最新记录（供每日自动同步） */
+async function runSyncOnce(opts = {}) {
   const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  if (opts.refreshFeishu) {
+    await refreshFeishuCache(); // 失败自动沿用旧缓存，不中断
+  }
   let rows, real = true, usedFallback = false;
   try {
     rows = await fetchRealJobs();
@@ -360,4 +400,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { runSyncOnce, importFeishuFromCache, REAL_SOURCE_NAME, DEMO_SOURCE_NAME, FEISHU_SOURCE_NAME, normalizeFeishu, loadFeishuCache };
+module.exports = { runSyncOnce, importFeishuFromCache, refreshFeishuCache, REAL_SOURCE_NAME, DEMO_SOURCE_NAME, FEISHU_SOURCE_NAME, normalizeFeishu, loadFeishuCache };

@@ -41,19 +41,19 @@ app.use((err, req, res, next) => {
 async function bootstrap() {
   const count = all('SELECT COUNT(*) AS c FROM jobs')[0].c;
   if (count === 0) {
-    const r = await runSyncOnce();
+    const r = await runSyncOnce({ refreshFeishu: true });
     console.log(`[首次同步] 岗位库初始化完成，共 ${r.total} 条`);
   }
-  // 每日 03:00 自动拉取最新岗位（演示数据源刷新截止日期；接入真实源后此处不变）
+  // 每日 03:00 自动同步：先拉取用户飞书多维表格最新记录，再拉 GitHub 公开源，合并去重入库
   cron.schedule('0 3 * * *', async () => {
     try {
-      const r = await runSyncOnce();
-      console.log(`[定时同步] ${new Date().toLocaleString('zh-CN')} 新增 ${r.added}，刷新 ${r.updated}，共 ${r.total} 条`);
+      const r = await runSyncOnce({ refreshFeishu: true });
+      console.log(`[定时同步] ${new Date().toLocaleString('zh-CN')} GitHub新增 ${r.added} / 刷新 ${r.updated}，飞书新增 ${r.feishu_added}（跳过 ${r.feishu_skipped}），共 ${r.total} 条岗位`);
     } catch (e) {
       console.error('[定时同步失败]', e.message);
     }
   });
-  console.log(`[定时任务] 每日 03:00 自动同步岗位已注册`);
+  console.log(`[定时任务] 每日 03:00 自动同步已注册（GitHub 公开源 + 飞书多维表格）`);
 
   app.listen(PORT, () => {
     console.log('------------------------------------------');
