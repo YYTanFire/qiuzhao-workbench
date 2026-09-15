@@ -52,7 +52,7 @@ router.get('/', (req, res) => {
   const rows = all(
     `SELECT a.id AS application_id, a.status, a.note, a.created_at AS applied_at, j.*
      FROM applications a JOIN jobs j ON j.id = a.job_id
-     WHERE a.user_id = ? ${where} ORDER BY j.deadline ASC, a.id DESC`,
+     WHERE a.user_id = ? ${where} ORDER BY CASE WHEN j.deadline = '' THEN 1 ELSE 0 END, j.deadline ASC, a.id DESC`,
     params
   );
   res.json(attachLevels(rows, settings));

@@ -10,10 +10,11 @@ const { runSyncOnce } = require('../sync');
 const router = express.Router();
 router.use(requireAuth);
 
-// 岗位列表（多维筛选）
+// 岗位列表（多维筛选；默认只展示未过期岗位，「尽快投递」等无日期岗位保留）
 router.get('/', (req, res) => {
   const { company_type, industry, job_category, location, education, keyword, session_year, batch, page = 1, page_size = 24 } = req.query;
-  const conds = [];
+  const EXPIRED = "(deadline >= date('now','localtime') OR deadline = '')";
+  const conds = [EXPIRED];
   const params = [];
   if (company_type) { conds.push('company_type = ?'); params.push(company_type); }
   if (industry) { conds.push('industry = ?'); params.push(industry); }
@@ -30,15 +31,16 @@ router.get('/', (req, res) => {
   const rows = all(
     `SELECT j.*, CASE WHEN a.id IS NULL THEN 0 ELSE 1 END AS in_plan
      FROM jobs j LEFT JOIN applications a ON a.job_id = j.id AND a.user_id = ?
-     ${where} ORDER BY j.deadline ASC, j.id DESC LIMIT ? OFFSET ?`,
+     ${where} ORDER BY CASE WHEN j.deadline = '' THEN 1 ELSE 0 END, j.deadline ASC, j.id DESC LIMIT ? OFFSET ?`,
     [req.user.id, ...params, limit, offset]
   );
   res.json({ total, page: Number(page) || 1, page_size: limit, items: rows });
 });
 
-// 筛选维度聚合
+// 筛选维度聚合（与列表口径一致：仅未过期岗位）
 router.get('/facets', (req, res) => {
-  const facet = (col) => all(`SELECT ${col} AS v, COUNT(*) AS c FROM jobs WHERE ${col} IS NOT NULL AND ${col} != '' GROUP BY ${col} ORDER BY c DESC LIMIT 20`);
+  const base = "WHERE (deadline >= date('now','localtime') OR deadline = '') AND ";
+  const facet = (col) => all(`SELECT ${col} AS v, COUNT(*) AS c FROM jobs ${base}${col} IS NOT NULL AND ${col} != '' GROUP BY ${col} ORDER BY c DESC LIMIT 20`);
   res.json({
     company_type: facet('company_type'),
     industry: facet('industry'),

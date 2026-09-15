@@ -43,9 +43,14 @@
     const t = new Date(); t.setHours(0, 0, 0, 0);
     return Math.round((dl - t) / 86400000);
   }
-  function deadlineChip(deadline, cls = '') {
+  function deadlineChip(job, cls = '') {
+    const deadline = typeof job === 'string' ? job : (job && job.deadline);
+    const text = typeof job === 'string' ? '' : ((job && job.deadline_text) || '');
     const d = daysLeft(deadline);
-    if (d == null) return '<span class="deadline-chip dl-normal">截止未知</span>';
+    if (d == null) {
+      if (text) return `<span class="deadline-chip dl-normal" title="${text}">${text}</span>`;
+      return '<span class="deadline-chip dl-normal">截止未知</span>';
+    }
     if (d < 0) return `<span class="deadline-chip dl-expired">已截止 ${-d} 天</span>`;
     if (d === 0) return '<span class="deadline-chip dl-urgent">今日截止</span>';
     if (d <= 3) return `<span class="deadline-chip dl-urgent">${d} 天后截止</span>`;

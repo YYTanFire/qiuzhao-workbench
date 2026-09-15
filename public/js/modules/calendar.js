@@ -17,13 +17,13 @@ const Calendar = {
     const timeline = items.map((a) => {
       const d = a.days_left;
       const dateTxt = a.deadline ? `${a.deadline.slice(5, 7)}.${a.deadline.slice(8, 10)}` : '--';
-      const dayLabel = d == null ? '未知' : d < 0 ? `超 ${-d} 天` : d === 0 ? '今天' : `剩 ${d} 天`;
+      const dayLabel = a.deadline ? (d == null ? '未知' : d < 0 ? `超 ${-d} 天` : d === 0 ? '今天' : `剩 ${d} 天`) : (a.deadline_text || '未知');
       const cls = d != null && d < 0 ? 'expired' : a.alert_level === 'urgent' ? 'urgent' : a.alert_level === 'warn' ? 'warn' : '';
       const done = ['offer', 'rejected'].includes(a.status);
       return `
       <div class="cal-item ${cls} ${done ? 'done' : ''}">
         <div class="cal-card ${a.alert_level === 'urgent' ? 'urgent' : a.alert_level === 'warn' ? 'warn' : ''}">
-          <div class="cal-days"><b>${dateTxt.split('.')[1]}</b><span>${dateTxt.split('.')[0]}月</span></div>
+          <div class="cal-days"><b>${a.deadline ? dateTxt.split('.')[1] : '—'}</b><span>${a.deadline ? dateTxt.split('.')[0] + '月' : (a.deadline_text || '截止')}</span></div>
           <div class="cal-main">
             <div class="row" style="gap:8px"><span class="co">${esc(a.company)}</span>${statusPill(a.status)}${a.alert_level === 'urgent' ? '<span class="pill pill-red">紧急</span>' : a.alert_level === 'warn' ? '<span class="pill pill-amber">预警</span>' : ''}</div>
             <div class="po">${esc(a.position)}</div>

@@ -24,7 +24,7 @@ const Dashboard = {
           <div style="font-weight:700;font-size:13.5px">${esc(j.company)} · ${esc(j.position)}</div>
           <div class="small muted">${esc(j.location || '')}${j.salary_min ? ' · ' + fmtSalary(j) : ''}</div>
         </div>
-        ${deadlineChip(dl)}
+        ${deadlineChip(j)}
       </div>`;
     }).join('') || window.App.emptyBox('未来 7 天没有临近截止的投递，去岗位雷达加一些吧', '📡');
 

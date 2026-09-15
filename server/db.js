@@ -155,6 +155,27 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_user ON knowledge_docs(user_id);
 
 db.exec(SCHEMA);
 
+// ---- 轻量迁移：老库补充新增列（幂等） ----
+const EXTRA_COLS = {
+  jobs: [
+    ['deadline_text', "TEXT"],
+    ['official_url', "TEXT"],
+    ['apply_url', "TEXT"],
+    ['is_demo', "INTEGER NOT NULL DEFAULT 0"],
+  ],
+};
+for (const [table, cols] of Object.entries(EXTRA_COLS)) {
+  const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+  for (const [name, type] of cols) {
+    if (!existing.has(name)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    }
+  }
+}
+
+// 历史兼容：v1 演示岗位（来源为旧演示源名）回填 is_demo=1，避免被误判为真实数据
+db.exec(`UPDATE jobs SET is_demo = 1 WHERE is_demo = 0 AND source IN ('企业官网招聘页', '校招信息汇总表')`);
+
 /** 运行参数化查询并返回所有行 */
 function all(sql, params = []) {
   return db.prepare(sql).all(...params);

@@ -36,7 +36,7 @@ const Radar = {
           <span>${esc(j.major_requirement || '')}</span>
         </div>
         <div class="between">
-          ${deadlineChip(j.deadline)}
+          ${deadlineChip(j)}
           <div class="jc-actions">
             ${j.in_plan ? statusPill('planned') : `<button class="btn btn-primary btn-sm" data-add="${j.id}">＋ 加入投递</button>`}
             <button class="btn btn-sm" data-detail="${j.id}">详情</button>
@@ -132,8 +132,10 @@ const Radar = {
             ${['company_type', 'industry', 'job_category', 'location', 'education_required', 'session_year', 'batch'].map((k) => j[k] ? `<span class="tag">${esc(j[k])}</span>` : '').join('')}
           </div>
           <div class="mt12 small muted">薪资：<b class="muted" style="color:var(--ink)">${fmtSalary(j)}</b> · 专业要求：${esc(j.major_requirement || '不限')}</div>
-          <div class="mt8">${window.App.deadlineChip(j.deadline)}</div>
+          <div class="mt8">${window.App.deadlineChip(j)}</div>
           ${j.has_written_test ? '<div class="mt8 pill pill-amber">📝 该岗位包含笔试环节</div>' : ''}
+          ${j.apply_url ? `<div class="mt8"><a class="btn btn-sm btn-primary" href="${esc(j.apply_url)}" target="_blank" rel="noopener">🚀 前往投递</a></div>` : ''}
+          ${j.official_url ? `<div class="mt8 small"><a href="${esc(j.official_url)}" target="_blank" rel="noopener" style="color:var(--primary)">📄 查看官方公告 →</a></div>` : ''}
           <div class="mt8 small muted">数据源：${esc(j.source || '')} · 同步于 ${esc(String(j.synced_at || '').slice(0, 16))}</div>
         </div>
         <div class="modal-foot">
