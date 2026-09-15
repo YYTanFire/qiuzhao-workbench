@@ -3,6 +3,7 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 data/jobs-source.json
+data/feishu-jobs.json
 data/.secret
 .env
 *.log

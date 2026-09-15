@@ -13,6 +13,8 @@ const { guessCategory } = require('./ai/service');
 const REAL_SOURCE_URL = 'https://raw.githubusercontent.com/HU-eun/campus-recruitment/main/data/jobs.json';
 const REAL_SOURCE_NAME = '校招信息汇总平台（公开 GitHub）';
 const DEMO_SOURCE_NAME = '内置演示数据源（离线回退）';
+const FEISHU_SOURCE_NAME = '校招汇总表（用户飞书多维表格）';
+const FEISHU_CACHE = require('path').join(__dirname, '..', 'data', 'feishu-jobs.json');
 
 // ==================== 数据标准化 ====================
 
@@ -109,6 +111,106 @@ async function fetchRealJobs() {
   throw lastErr;
 }
 
+// ==================== 飞书多维表格数据源（用户自建「校招汇总表（优先）」） ====================
+
+/** 学历要求文本 → 最低学历档（用于筛选） */
+function eduLevel(text) {
+  if (!text) return '';
+  if (/大专/.test(text)) return '大专';
+  if (/本科/.test(text)) return '本科';
+  if (/硕士/.test(text)) return '硕士';
+  if (/博士/.test(text)) return '博士';
+  return text.trim().slice(0, 20);
+}
+
+/** 笔试取值 → has_written_test */
+function testFlag(values) {
+  const joined = values.join(',');
+  if (/有笔试|含免笔试|部分岗位有笔试|免笔试/.test(joined)) return 1;
+  return 0; // 没有笔试 / 未明确 / "/" 等视为无笔试标记
+}
+
+/** markdown 链接 "[text](url)" 或裸 URL → url */
+function stripLink(v) {
+  const s = String(v).trim();
+  const m = s.match(/\]\((https?:\/\/[^)\s]+)\)/);
+  if (m) return m[1];
+  return /^https?:\/\//.test(s) ? s : '';
+}
+
+/** 批次优先级（校招工作台排序：提前批 > 秋招批 > 补录批 > 春招批 > 实习 > 社招） */
+const BATCH_PRIORITY = [['秋招提前批', '提前批'], ['秋招', '秋招批'], ['秋招补招', '补录批'], ['秋招补录', '补录批'], ['春招专场', '春招批'], ['春招', '春招批'], ['实习', '实习'], ['社招', '社招']];
+function pickBatch(values) {
+  for (const [k, v] of BATCH_PRIORITY) {
+    if (values.some((x) => x.includes(k))) return v;
+  }
+  return values.filter(Boolean).join('/').slice(0, 20) || '其他';
+}
+
+/** 飞书记录（字段序数组 + fields）→ 标准行结构；只保留面向 2027 届的岗位 */
+function normalizeFeishu(rec, idx) {
+  const S = (i) => (rec[idx[i]] == null ? '' : String(rec[idx[i]]));
+  const ARR = (i) => (Array.isArray(rec[idx[i]]) ? rec[idx[i]].map(String) : rec[idx[i]] == null || rec[idx[i]] === '' ? [] : [String(rec[idx[i]])]);
+
+  const company = S('公司').trim();
+  const position = S('招聘岗位').trim().replace(/\s+/g, ' ');
+  if (!company || !position || /使用说明|👈|⬆️|⬇️|补充表格|持续更新|如何筛选/.test(company + position)) return null;
+
+  const targets = ARR('招聘届次');
+  if (!targets.some((t) => t.includes('2027'))) return null; // 仅面向 2027 届
+
+  // 截止时间：可解析日期 → deadline；否则保留原文（尽快投递 / 招满为止）
+  let deadline = S('截止时间').trim();
+  let deadlineText = deadline;
+  const m = deadline.match(/(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})/);
+  if (m) {
+    deadline = `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+    deadlineText = '';
+  } else {
+    deadline = '';
+  }
+
+  const types = ARR('企业类型').filter((x) => x && x !== '/' && !x.includes('先看'));
+  const industries = ARR('行业类别').filter((x) => x && x !== '/' && !x.includes('选择包括') && !x.includes('如何筛选'));
+
+  return {
+    company,
+    position: position.slice(0, 200) || '校招岗位（详见官方公告）',
+    company_type: types.join(' / ').slice(0, 40),
+    industry: industries.join(' / ').slice(0, 80),
+    job_category: guessCategory(position),
+    location: ARR('工作地点').filter((x) => x && x !== '/' && !x.includes('先看')).join(' / ').slice(0, 80) || '未明确',
+    education_required: eduLevel(S('学历要求')),
+    salary_min: null,
+    salary_max: null,
+    deadline,
+    deadline_text: deadlineText,
+    has_written_test: testFlag(ARR('是否笔试').concat(ARR('是否笔试 (1)'))),
+    session_year: '2027',
+    batch: pickBatch(ARR('批次（暑期实习）')),
+    major_requirement: S('专业要求').replace(/\s+/g, ' ').slice(0, 300),
+    source: FEISHU_SOURCE_NAME,
+    official_url: stripLink(S('公告链接')),
+    apply_url: stripLink(S('简历投递链接')),
+    is_demo: 0,
+  };
+}
+
+/** 读取本地飞书缓存（data/feishu-jobs.json，由 import-feishu.js 刷新）并标准化 */
+function loadFeishuCache() {
+  try {
+    const fs = require('fs');
+    if (!fs.existsSync(FEISHU_CACHE)) return null;
+    const data = JSON.parse(fs.readFileSync(FEISHU_CACHE, 'utf8'));
+    if (!data.records || !data.fields) return null;
+    const idx = Object.fromEntries(data.fields.map((f, i) => [f.name, i]));
+    return data.records.map((r) => normalizeFeishu(r, idx)).filter(Boolean);
+  } catch (e) {
+    console.warn('[同步] 飞书缓存读取失败:', e.message);
+    return null;
+  }
+}
+
 // ==================== 内置演示池（离线回退） ====================
 
 const POOL = [
@@ -161,14 +263,18 @@ function buildDemoRows() {
 
 // ==================== 同步主流程 ====================
 
+/** 多源感知 upsert：每个数据源只更新自己来源的行；同岗位已由其他源提供则不覆盖 */
 function upsertJob(r, now) {
-  const exist = db.prepare('SELECT id FROM jobs WHERE company = ? AND position = ? AND batch = ? AND session_year = ?')
-    .get(r.company, r.position, r.batch, r.session_year);
-  if (exist) {
-    db.prepare(`UPDATE jobs SET company_type=?, industry=?, job_category=?, location=?, education_required=?, salary_min=?, salary_max=?, deadline=?, deadline_text=?, has_written_test=?, major_requirement=?, source=?, official_url=?, apply_url=?, is_demo=?, synced_at=? WHERE id=?`)
-      .run(r.company_type || '', r.industry || '', r.job_category || '', r.location || '', r.education_required || '', r.salary_min, r.salary_max, r.deadline || '', r.deadline_text || '', r.has_written_test || 0, r.major_requirement || '', r.source || '', r.official_url || '', r.apply_url || '', r.is_demo || 0, now, exist.id);
+  const mine = db.prepare('SELECT id FROM jobs WHERE company = ? AND position = ? AND batch = ? AND session_year = ? AND source = ?')
+    .get(r.company, r.position, r.batch, r.session_year, r.source);
+  if (mine) {
+    db.prepare(`UPDATE jobs SET company_type=?, industry=?, job_category=?, location=?, education_required=?, salary_min=?, salary_max=?, deadline=?, deadline_text=?, has_written_test=?, major_requirement=?, official_url=?, apply_url=?, is_demo=?, synced_at=? WHERE id=?`)
+      .run(r.company_type || '', r.industry || '', r.job_category || '', r.location || '', r.education_required || '', r.salary_min, r.salary_max, r.deadline || '', r.deadline_text || '', r.has_written_test || 0, r.major_requirement || '', r.official_url || '', r.apply_url || '', r.is_demo || 0, now, mine.id);
     return 'updated';
   }
+  const other = db.prepare('SELECT id FROM jobs WHERE company = ? AND position = ? AND batch = ? AND session_year = ?')
+    .get(r.company, r.position, r.batch, r.session_year);
+  if (other) return 'skipped'; // 同岗位已由其他数据源提供，保留原来源
   db.prepare(`INSERT INTO jobs (company, position, company_type, industry, job_category, location, education_required, salary_min, salary_max, deadline, deadline_text, has_written_test, session_year, batch, major_requirement, source, official_url, apply_url, is_demo, synced_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(r.company, r.position, r.company_type || '', r.industry || '', r.job_category || '', r.location || '', r.education_required || '', r.salary_min, r.salary_max, r.deadline || '', r.deadline_text || '', r.has_written_test || 0, r.session_year || '2027', r.batch || '', r.major_requirement || '', r.source || '', r.official_url || '', r.apply_url || '', r.is_demo || 0, now);
@@ -189,7 +295,7 @@ async function runSyncOnce() {
     usedFallback = true;
   }
 
-  let added = 0, updated = 0;
+  let added = 0, updated = 0, skipped = 0, feishuAdded = 0, feishuSkipped = 0;
   tx(() => {
     if (real) {
       // 真实数据就绪：清掉旧的演示岗位及其投递，避免虚构数据混入
@@ -206,22 +312,52 @@ async function runSyncOnce() {
     for (const r of rows) {
       const st = upsertJob(r, now);
       if (st === 'added') added++;
-      else updated++;
+      else if (st === 'updated') updated++;
+      else skipped++;
+    }
+
+    // 第二数据源：用户飞书多维表格（本地缓存，由 server/import-feishu.js 刷新）
+    const feishuRows = loadFeishuCache();
+    if (feishuRows && feishuRows.length) {
+      for (const r of feishuRows) {
+        const st = upsertJob(r, now);
+        if (st === 'added') feishuAdded++;
+        else if (st === 'skipped') feishuSkipped++;
+      }
     }
   });
 
   const total = all('SELECT COUNT(*) AS c FROM jobs')[0].c;
-  return { added, updated, total, synced_at: now, source: real ? REAL_SOURCE_NAME : DEMO_SOURCE_NAME, fallback: usedFallback };
+  return {
+    added, updated, skipped, feishu_added: feishuAdded, feishu_skipped: feishuSkipped,
+    total, synced_at: now, source: real ? REAL_SOURCE_NAME : DEMO_SOURCE_NAME, fallback: usedFallback,
+  };
+}
+
+/** 从本地缓存导入飞书源岗位（供 import-feishu.js 与 seed 复用） */
+function importFeishuFromCache() {
+  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const feishuRows = loadFeishuCache();
+  if (!feishuRows || !feishuRows.length) return { added: 0, skipped: 0, rows: 0 };
+  let added = 0, skipped = 0;
+  tx(() => {
+    for (const r of feishuRows) {
+      const st = upsertJob(r, now);
+      if (st === 'added') added++;
+      else if (st === 'skipped') skipped++;
+    }
+  });
+  return { added, skipped, rows: feishuRows.length };
 }
 
 // 独立脚本入口：node server/sync.js
 if (require.main === module) {
   runSyncOnce().then((r) => {
-    console.log(`[同步完成] 来源=${r.source} 新增 ${r.added}，刷新 ${r.updated}，当前共 ${r.total} 条岗位，时间 ${r.synced_at}`);
+    console.log(`[同步完成] 来源=${r.source} 新增 ${r.added}，刷新 ${r.updated}，跳过 ${r.skipped}，飞书源新增 ${r.feishu_added}（跳过 ${r.feishu_skipped}），当前共 ${r.total} 条岗位，时间 ${r.synced_at}`);
   }).catch((e) => {
     console.error('[同步失败]', e);
     process.exit(1);
   });
 }
 
-module.exports = { runSyncOnce, REAL_SOURCE_NAME, DEMO_SOURCE_NAME };
+module.exports = { runSyncOnce, importFeishuFromCache, REAL_SOURCE_NAME, DEMO_SOURCE_NAME, FEISHU_SOURCE_NAME, normalizeFeishu, loadFeishuCache };

@@ -51,7 +51,8 @@ qiuzhao-workbench/
 │   ├── index.js             # 服务入口 + 每日 03:00 定时同步（node-cron）
 │   ├── db.js                # 数据层（Node 内置 SQLite，WAL 模式）
 │   ├── auth.js              # 邮箱+密码注册登录，JWT 鉴权（crypto.scrypt 哈希）
-│   ├── sync.js              # 每日岗位同步（真实公开源 + 离线演示池回退）
+│   ├── sync.js              # 每日岗位同步（GitHub 公开源 + 飞书源缓存 + 离线演示回退）
+│   ├── import-feishu.js     # 飞书多维表格数据源：拉取 → 缓存 → 导入（node server/import-feishu.js）
 │   ├── seed.js              # 种子数据（演示账号/岗位/投递/知识库）
 │   ├── fileparse.js         # Word/PDF/TXT 文本提取
 │   ├── ai/service.js        # AI 服务层（LLM API + 内置演示引擎双模式）
@@ -96,10 +97,12 @@ qiuzhao-workbench/
 
 ## 📡 岗位数据源
 
-- **主数据源（真实）**：公开 GitHub 仓库 [HU-eun/campus-recruitment](https://github.com/HU-eun/campus-recruitment)（2027 届校招信息汇总平台，约 7200+ 条记录，GitHub Actions 每日从飞书多维表格自动更新）。
-- **接入方式**：`server/sync.js` 每日 03:00（node-cron）拉取 `data/jobs.json`，自动过滤非 2027 届 / 纯实习 / 指南类记录，标准化字段（截止时间兼容「尽快投递」、批次归一化、岗位大类推断）后去重入库；岗位雷达页也可手动「↻ 立即同步」。
+- **主数据源（真实·自动）**：公开 GitHub 仓库 [HU-eun/campus-recruitment](https://github.com/HU-eun/campus-recruitment)（2027 届校招信息汇总平台，约 7200+ 条记录，GitHub Actions 每日从飞书多维表格自动更新）。
+- **第二数据源（用户自建飞书多维表格）**：`server/import-feishu.js` 从你分享的「校招汇总表（优先）」拉取全量记录（约 1.1 万条），过滤非 2027 届后导入（约 2200+ 条新增岗位），数据缓存于本地 `data/feishu-jobs.json`（已 gitignore，不进入公开仓库）。表更新后重跑 `node server/import-feishu.js` 即可刷新。
+- **多源去重**：按「公司 + 岗位 + 批次 + 届次」去重，同岗位已由其他数据源提供时不覆盖，两个来源互不覆盖、可同时保留。
+- **接入方式**：`server/sync.js` 每日 03:00（node-cron）拉取 GitHub 源并导入本地飞书缓存，自动过滤非 2027 届 / 指南类记录，标准化字段（截止时间兼容「尽快投递 / 招满为止」、批次归一化、学历档位、岗位大类推断）后去重入库；岗位雷达页也可手动「↻ 立即同步」。
 - **离线回退**：网络不可用时自动切换内置演示池（26 条虚构企业岗位），保证产品可演示。
-- **数据可追溯**：每条岗位保留官方公告 / 投递链接（详情弹窗可直接跳转），来源字段标注为「校招信息汇总平台（公开 GitHub）」。
+- **数据可追溯**：每条岗位保留官方公告 / 投递链接（详情弹窗可直接跳转），来源字段标注具体数据源。
 
 ## 🔐 知识产权与合规边界
 
