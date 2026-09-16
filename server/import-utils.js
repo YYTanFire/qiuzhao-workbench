@@ -91,8 +91,10 @@ function buildRow({
   source = '',
   official_url = '',
   apply_url = '',
+  company_url = '',
   session_year = '2027',
   is_demo = 0,
+  reliable = 1,
 }) {
   if (!company || !position) return null;
   const { deadline, deadline_text } = parseDeadline(deadline_raw);
@@ -116,7 +118,9 @@ function buildRow({
     source: String(source || '').trim(),
     official_url: String(official_url || '').trim().slice(0, 500),
     apply_url: String(apply_url || '').trim().slice(0, 500),
+    company_url: String(company_url || '').trim().slice(0, 500),
     is_demo: is_demo ? 1 : 0,
+    reliable: reliable ? 1 : 0,
   };
 }
 
@@ -130,16 +134,16 @@ function upsertJob(r, now) {
   const mine = db.prepare('SELECT id FROM jobs WHERE company = ? AND position = ? AND batch = ? AND session_year = ? AND source = ?')
     .get(r.company, r.position, r.batch, r.session_year, r.source);
   if (mine) {
-    db.prepare(`UPDATE jobs SET company_type=?, industry=?, job_category=?, location=?, education_required=?, salary_min=?, salary_max=?, deadline=?, deadline_text=?, has_written_test=?, major_requirement=?, official_url=?, apply_url=?, is_demo=?, synced_at=? WHERE id=?`)
-      .run(r.company_type || '', r.industry || '', r.job_category || '', r.location || '', r.education_required || '', r.salary_min, r.salary_max, r.deadline || '', r.deadline_text || '', r.has_written_test || 0, r.major_requirement || '', r.official_url || '', r.apply_url || '', r.is_demo || 0, now, mine.id);
+    db.prepare(`UPDATE jobs SET company_type=?, industry=?, job_category=?, location=?, education_required=?, salary_min=?, salary_max=?, deadline=?, deadline_text=?, has_written_test=?, major_requirement=?, official_url=?, apply_url=?, company_url=?, is_demo=?, reliable=?, synced_at=? WHERE id=?`)
+      .run(r.company_type || '', r.industry || '', r.job_category || '', r.location || '', r.education_required || '', r.salary_min, r.salary_max, r.deadline || '', r.deadline_text || '', r.has_written_test || 0, r.major_requirement || '', r.official_url || '', r.apply_url || '', r.company_url || '', r.is_demo || 0, r.reliable || 0, now, mine.id);
     return 'updated';
   }
   const other = db.prepare('SELECT id FROM jobs WHERE company = ? AND position = ? AND batch = ? AND session_year = ?')
     .get(r.company, r.position, r.batch, r.session_year);
   if (other) return 'skipped';
-  db.prepare(`INSERT INTO jobs (company, position, company_type, industry, job_category, location, education_required, salary_min, salary_max, deadline, deadline_text, has_written_test, session_year, batch, major_requirement, source, official_url, apply_url, is_demo, synced_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(r.company, r.position, r.company_type || '', r.industry || '', r.job_category || '', r.location || '', r.education_required || '', r.salary_min, r.salary_max, r.deadline || '', r.deadline_text || '', r.has_written_test || 0, r.session_year || '2027', r.batch || '', r.major_requirement || '', r.source || '', r.official_url || '', r.apply_url || '', r.is_demo || 0, now);
+  db.prepare(`INSERT INTO jobs (company, position, company_type, industry, job_category, location, education_required, salary_min, salary_max, deadline, deadline_text, has_written_test, session_year, batch, major_requirement, source, official_url, apply_url, company_url, is_demo, reliable, synced_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(r.company, r.position, r.company_type || '', r.industry || '', r.job_category || '', r.location || '', r.education_required || '', r.salary_min, r.salary_max, r.deadline || '', r.deadline_text || '', r.has_written_test || 0, r.session_year || '2027', r.batch || '', r.major_requirement || '', r.source || '', r.official_url || '', r.apply_url || '', r.company_url || '', r.is_demo || 0, r.reliable || 0, now);
   return 'added';
 }
 
