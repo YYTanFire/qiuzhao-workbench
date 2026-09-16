@@ -12,6 +12,7 @@ const Radar = {
     company_type: { label: '公司性质', type: 'enum' },
     industry: { label: '行业', type: 'enum' },
     job_category: { label: '岗位大类', type: 'enum' },
+    job_track: { label: '岗位方向', type: 'enum' },
     location: { label: '地点', type: 'enum' },
     education_required: { label: '学历', type: 'enum' },
     batch: { label: '批次', type: 'enum' },
@@ -70,7 +71,7 @@ const Radar = {
           <span>${esc(j.batch || '')}</span>
         </div>
         <div class="jc-meta small muted">
-          <span>${esc(j.industry || '')}</span><span>${esc(j.job_category || '')}</span><span>${esc(j.session_year || '')} 届</span>
+          <span>${esc(j.industry || '')}</span><span>${esc(j.job_category || '')}</span><span>${esc(j.job_track || '')}</span><span>${esc(j.session_year || '')} 届</span>
           <span>${esc(j.major_requirement || '')}</span>
         </div>
         <div class="between">
@@ -93,6 +94,7 @@ const Radar = {
                 <option value="or" ${this.state.filter.logic === 'or' ? 'selected' : ''}>满足任一条件</option>
               </select>
               <button class="btn btn-sm" id="add-cond">＋ 添加筛选条件</button>
+              <button class="btn btn-sm btn-primary" id="easy-btn" title="一键筛出测试/技术支持/运维/数据等中低难度岗位">🎯 中低难度</button>
             </div>
             <div class="row">
               <button class="btn btn-sm" id="sync-btn">↻ 立即同步</button>
@@ -258,6 +260,18 @@ const Radar = {
       this.renderFilterPanel(root);
     });
 
+    // 中低难度一键筛选：测试 / 技术支持 / 运维 / 数据 / 数据标注（替换已有岗位方向条件）
+    const easyBtn = root.querySelector('#easy-btn');
+    if (easyBtn) easyBtn.addEventListener('click', () => {
+      const EASY = ['测试类', '技术支持类', '运维类', '数据类', '数据标注类'];
+      this.state.filter.conditions = this.state.filter.conditions || [];
+      const idx = this.state.filter.conditions.findIndex((c) => c.f === 'job_track');
+      if (idx >= 0) this.state.filter.conditions[idx] = { f: 'job_track', op: 'in', v: EASY };
+      else this.state.filter.conditions.push({ f: 'job_track', op: 'in', v: EASY });
+      this.state.page = 1;
+      this.refresh(root);
+    });
+
     root.querySelector('#filter-conds').addEventListener('change', (e) => {
       const el = e.target;
       const ci = Number(el.dataset.ci);
@@ -415,7 +429,7 @@ const Radar = {
           <span>${esc(j.batch || '')}</span>
         </div>
         <div class="jc-meta small muted">
-          <span>${esc(j.industry || '')}</span><span>${esc(j.job_category || '')}</span><span>${esc(j.session_year || '')} 届</span>
+          <span>${esc(j.industry || '')}</span><span>${esc(j.job_category || '')}</span><span>${esc(j.job_track || '')}</span><span>${esc(j.session_year || '')} 届</span>
           <span>${esc(j.major_requirement || '')}</span>
         </div>
         <div class="between">

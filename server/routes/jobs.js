@@ -16,6 +16,7 @@ const FILTER_FIELDS = {
   company_type: 'company_type', industry: 'industry', job_category: 'job_category',
   location: 'location', education_required: 'education_required', batch: 'batch',
   company: 'company', position: 'position', major_requirement: 'major_requirement',
+  job_track: 'job_track',
 };
 const EQ_OPS = new Set(['eq', 'neq']); // 单值精确匹配
 const LIKE_OPS = new Set(['contains', 'not_contains', 'in', 'all']); // 模糊/多值匹配
@@ -92,6 +93,7 @@ router.get('/facets', (req, res) => {
     company_type: facet('company_type'),
     industry: facet('industry'),
     job_category: facet('job_category'),
+    job_track: facet('job_track'),
     location: facet('location'),
     education: facet('education_required'),
     batch: facet('batch'),
