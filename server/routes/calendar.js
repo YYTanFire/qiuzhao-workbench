@@ -104,15 +104,24 @@ router.post('/', (req, res) => {
   }
 });
 
-// 批量加入投递计划（按行业，与岗位雷达口径一致：仅未过期岗位；幂等跳过已加入）
+// 批量加入投递计划（支持按行业列表 或 飞书式筛选条件；仅未过期岗位；幂等跳过已加入）
 router.post('/batch', (req, res) => {
-  const { industries } = req.body || {};
-  const list = Array.isArray(industries) ? industries.map((x) => String(x).trim()).filter(Boolean) : [];
-  if (!list.length) return res.status(400).json({ error: '请提供至少一个行业' });
+  const { industries, filters, logic } = req.body || {};
   const EXPIRED = "(deadline >= date('now','localtime') OR deadline = '')";
-  const ors = list.map(() => 'industry LIKE ?').join(' OR ');
-  const params = list.map((x) => `%${x}%`);
-  const rows = all(`SELECT id FROM jobs WHERE ${EXPIRED} AND (${ors})`, params);
+  const conds = [EXPIRED];
+  const params = [];
+  if (Array.isArray(industries) && industries.length) {
+    const list = industries.map((x) => String(x).trim()).filter(Boolean);
+    if (!list.length) return res.status(400).json({ error: '请提供至少一个行业' });
+    conds.push('(' + list.map(() => 'industry LIKE ?').join(' OR ') + ')');
+    params.push(...list.map((x) => `%${x}%`));
+  }
+  if (filters) {
+    const f = buildFilters(filters, logic);
+    if (f.where) { conds.push(f.where); params.push(...f.params); }
+  }
+  if (conds.length === 1) return res.status(400).json({ error: '请提供筛选条件' });
+  const rows = all(`SELECT id FROM jobs WHERE ${conds.join(' AND ')}`, params);
   try {
     const inserted = tx(() => {
       let n = 0;
@@ -126,6 +135,99 @@ router.post('/batch', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// 简历方向洞察：对筛选后的投递计划聚合岗位方向/技能/专业/英语/证书，给出简历优化建议
+router.get('/insights', (req, res) => {
+  const { filters, logic } = req.query;
+  const conds = ['a.user_id = ?'];
+  const params = [req.user.id];
+  if (filters) {
+    const f = buildFilters(filters, logic);
+    if (f.where) { conds.push(f.where); params.push(...f.params); }
+  }
+  const where = `WHERE ${conds.join(' AND ')}`;
+  const rows = all(
+    `SELECT j.job_track, j.skill_req, j.req_note, j.major_requirement, j.english_req, j.cert_req
+     FROM applications a JOIN jobs j ON j.id = a.job_id ${where}`,
+    params
+  );
+
+  const countBy = (keyFn, max) => {
+    const m = new Map();
+    for (const r of rows) {
+      const key = keyFn(r);
+      if (key) m.set(key, (m.get(key) || 0) + 1);
+    }
+    return Array.from(m.entries()).map(([k, c]) => ({ k, c })).sort((x, y) => y.c - x.c).slice(0, max);
+  };
+
+  // 岗位方向
+  const tracks = countBy((r) => (r.job_track && r.job_track.trim()) || '', 8).filter((x) => x.k);
+
+  // 技能短语：从 skill_req / req_note 提取 "熟悉/掌握/精通/熟练使用 + 短语"
+  const skillMap = new Map();
+  const skillRe = /(?:熟悉|掌握|精通|熟练(?:使用|掌握|操作)?|会使用)[^，。；、\n（(]{2,24}/g;
+  for (const r of rows) {
+    for (const t of [r.skill_req, r.req_note]) {
+      if (!t) continue;
+      const ms = String(t).match(skillRe) || [];
+      for (const m of ms) {
+        const k = m.replace(/^熟悉|^掌握|^精通|^熟练(?:使用|掌握|操作)?|^会使用/, '').trim();
+        if (k.length >= 2 && k.length <= 20) skillMap.set(k, (skillMap.get(k) || 0) + 1);
+      }
+    }
+  }
+  const skills = Array.from(skillMap.entries()).map(([k, c]) => ({ k, c })).sort((x, y) => y.c - x.c).slice(0, 10);
+
+  // 专业：major_requirement 拆词统计
+  const majorMap = new Map();
+  const STOP = new Set(['专业', '学历', '要求', '及以上', '相关', '等', '不限', '本科', '硕士', '优先', '相关专业', '按照', '筛选', '岗位']);
+  for (const r of rows) {
+    if (!r.major_requirement) continue;
+    const parts = String(r.major_requirement).split(/[,，、;；/\/\s]+/);
+    for (let p of parts) {
+      p = p.trim();
+      if (p.length < 2 || p.length > 16 || STOP.has(p)) continue;
+      if (p.includes('按照') || p.includes('岗位筛选')) continue; // 牛企直聘占位文本，视为不限
+      if (/[~～！!?？@#\$%\^&\*()\[\]{}<>、。，；]/.test(p)) continue; // 过滤噪声符号
+      majorMap.set(p, (majorMap.get(p) || 0) + 1);
+    }
+  }
+  const majors = Array.from(majorMap.entries()).map(([k, c]) => ({ k, c })).sort((x, y) => y.c - x.c).slice(0, 10);
+
+  // 英语 / 证书
+  const english = countBy((r) => (r.english_req && r.english_req.trim()) || '', 5).filter((x) => x.k);
+  const cert = countBy((r) => (r.cert_req && r.cert_req.trim()) || '', 5).filter((x) => x.k);
+
+  // 建议文本
+  const topTrack = tracks[0];
+  const secondTrack = tracks[1];
+  const TRACK_HINTS = {
+    '测试类': '测试用例设计、自动化测试（Selenium/Appium）、性能/接口测试、缺陷管理',
+    '技术支持类': '产品/技术支持、故障排查、客户沟通、Linux/网络基础、文档能力',
+    '研发类': '编程语言（C++/Java/Python）、数据结构与算法、项目开发经历',
+    '运维类': 'Linux、网络、容器（Docker/K8s）、监控告警、脚本编写',
+    '数据类': 'SQL、Python、数据分析、机器学习基础',
+    '产品类': '需求分析、原型设计（Axure/Figma）、用户调研',
+    '市场销售类': '商务沟通、渠道拓展、客户关系、行业洞察',
+    '运营类': '内容/用户运营、数据分析、活动策划',
+    '职能类': '办公软件、公文写作、流程管理',
+  };
+  const sug = [];
+  if (topTrack) {
+    sug.push(`该筛选范围以「${topTrack.k}」为主（${topTrack.c} 个岗位）${secondTrack ? `，其次「${secondTrack.k}」（${secondTrack.c} 个）` : ''}。`);
+  }
+  if (skills.length) sug.push(`高频技能要求：${skills.slice(0, 5).map((s) => s.k).join('、')}。`);
+  if (majors.length) sug.push(`偏好专业：${majors.slice(0, 5).map((m) => m.k).join('、')}。`);
+  if (english.length) sug.push(`英语要求：${english.slice(0, 3).map((e) => e.k).join('；')}。`);
+  if (cert.length) sug.push(`证书要求：${cert.slice(0, 3).map((c2) => c2.k).join('；')}。`);
+  if (topTrack && TRACK_HINTS[topTrack.k]) sug.push(`「${topTrack.k}」方向可重点准备：${TRACK_HINTS[topTrack.k]}。`);
+  sug.push(topTrack
+    ? `简历建议：突出「${topTrack.k}」相关项目与经历${skills[0] ? `（如 ${skills.slice(0, 3).map((s) => s.k).join('、')}）` : ''}，个人技能栏按以上关键词对齐，可显著提升命中率。`
+    : '当前筛选范围内暂无足够岗位数据生成建议，请调整筛选条件。');
+
+  res.json({ total: rows.length, tracks, skills, majors, english, cert, suggestion: sug.join('\n') });
 });
 
 // 更新状态/备注

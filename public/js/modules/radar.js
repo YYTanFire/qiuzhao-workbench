@@ -97,6 +97,7 @@ const Radar = {
               <button class="btn btn-sm btn-primary" id="easy-btn" title="一键筛出测试/技术支持/运维/数据等中低难度岗位">🎯 中低难度</button>
             </div>
             <div class="row">
+              <button class="btn btn-sm btn-primary" id="batch-add" title="把当前筛选出的岗位全部加入投递计划">⏳ 一键投递 (${this.state.total})</button>
               <button class="btn btn-sm" id="sync-btn">↻ 立即同步</button>
               <span class="small muted" id="sync-info">共 ${this.state.total} 个岗位</span>
             </div>
@@ -185,28 +186,19 @@ const Radar = {
       });
       if (el.dataset.filter === 'keyword') {
         let timer = null;
+        // 只刷新列表，不重建筛选面板，避免输入法 composition 被打断
         el.addEventListener('input', () => {
           clearTimeout(timer);
-          timer = setTimeout(() => { this.state.filter.keyword = el.value; this.state.page = 1; this.refresh(root); }, 400);
+          timer = setTimeout(() => { this.state.filter.keyword = el.value; this.state.page = 1; this.refreshList(root); }, 400);
         });
       }
     });
 
     this.bindConds(root);
+    this.bindPanelActions(root);
 
     root.querySelector('#prev-page').addEventListener('click', () => { this.state.page--; this.refresh(root); });
     root.querySelector('#next-page').addEventListener('click', () => { this.state.page++; this.refresh(root); });
-
-    root.querySelector('#sync-btn').addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      btn.disabled = true; btn.textContent = '同步中…';
-      try {
-        const r = await API.post('/jobs/sync', {});
-        toast(`同步完成：新增 ${r.added}，刷新 ${r.updated}，共 ${r.total} 条`, 'ok');
-        await this.refresh(root);
-      } catch (err) { toast(err.message, 'err'); }
-      btn.disabled = false; btn.textContent = '↻ 立即同步';
-    });
 
     root.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -288,6 +280,9 @@ const Radar = {
         if (!this.isValueNeeded(el.value)) cond.v = [];
       } else if (el.classList.contains('f-text')) {
         cond.v = el.value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean);
+        this.state.page = 1;
+        this.refreshList(root); // 只刷列表，保留面板与输入焦点
+        return;
       } else if (isCheckbox) {
         const vals = cond.v || [];
         cond.v = el.checked ? Array.from(new Set([...vals, el.value])) : vals.filter((v) => v !== el.value);
@@ -355,6 +350,43 @@ const Radar = {
     });
   },
 
+  // 绑定筛选面板动作（同步 / 一键投递）；面板重建后需重新绑定，用 _bound 防重复
+  bindPanelActions(root) {
+    const { toast } = window.App;
+    const syncBtn = root.querySelector('#sync-btn');
+    if (syncBtn && !syncBtn._bound) {
+      syncBtn._bound = true;
+      syncBtn.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true; btn.textContent = '同步中…';
+        try {
+          const r = await API.post('/jobs/sync', {});
+          toast(`同步完成：新增 ${r.added}，刷新 ${r.updated}，共 ${r.total} 条`, 'ok');
+          await this.refresh(root);
+        } catch (err) { toast(err.message, 'err'); }
+        btn.disabled = false; btn.textContent = '↻ 立即同步';
+      });
+    }
+    const batchBtn = root.querySelector('#batch-add');
+    if (batchBtn && !batchBtn._bound) {
+      batchBtn._bound = true;
+      batchBtn.addEventListener('click', async () => {
+        const conds = (this.state.filter.conditions || []).filter((c) => {
+          if (!c.f || !c.op) return false;
+          if (!this.isValueNeeded(c.op)) return true;
+          const v = Array.isArray(c.v) ? c.v : String(c.v || '').split(/[,，、]/).map((s) => s.trim()).filter(Boolean);
+          return v.length > 0;
+        });
+        if (!conds.length) { toast('请先设置筛选条件，再一键投递', 'err'); return; }
+        try {
+          const r = await API.post('/applications/batch', { filters: conds, logic: this.state.filter.logic });
+          toast(`已加入投递计划 ${r.inserted} 个，跳过已存在 ${r.skipped} 个`, 'ok');
+          await this.refresh(root);
+        } catch (err) { toast(err.message, 'err'); }
+      });
+    }
+  },
+
   // 只重建筛选面板并刷新列表（避免输入框失焦、保持滚动）
   async renderFilterPanel(root) {
     const panel = root.querySelector('#filter-panel');
@@ -369,6 +401,7 @@ const Radar = {
           <button class="btn btn-sm" id="add-cond">＋ 添加筛选条件</button>
         </div>
         <div class="row">
+          <button class="btn btn-sm btn-primary" id="batch-add" title="把当前筛选出的岗位全部加入投递计划">⏳ 一键投递 (${this.state.total})</button>
           <button class="btn btn-sm" id="sync-btn">↻ 立即同步</button>
           <span class="small muted" id="sync-info">共 ${this.state.total} 个岗位</span>
         </div>
@@ -383,13 +416,15 @@ const Radar = {
       });
       if (el.dataset.filter === 'keyword') {
         let timer = null;
+        // 只刷新列表，不重建筛选面板，避免输入法 composition 被打断
         el.addEventListener('input', () => {
           clearTimeout(timer);
-          timer = setTimeout(() => { this.state.filter.keyword = el.value; this.state.page = 1; this.refresh(root); }, 400);
+          timer = setTimeout(() => { this.state.filter.keyword = el.value; this.state.page = 1; this.refreshList(root); }, 400);
         });
       }
     });
     this.bindConds(root);
+    this.bindPanelActions(root);
     // 刷新列表（保留计数与分页）
     await this.refreshList(root);
   },
@@ -402,6 +437,8 @@ const Radar = {
     const info = root.querySelector('#sync-info');
     if (grid) grid.innerHTML = this.state.items.map((j) => this.cardHtml(j)).join('') || emptyBox('没有符合筛选条件的岗位', '📡');
     if (info) info.textContent = `共 ${this.state.total} 个岗位`;
+    const ba = root.querySelector('#batch-add');
+    if (ba) ba.textContent = `⏳ 一键投递 (${this.state.total})`;
     const prev = root.querySelector('#prev-page');
     const next = root.querySelector('#next-page');
     if (prev) prev.disabled = this.state.page <= 1;

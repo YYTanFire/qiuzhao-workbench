@@ -47,14 +47,16 @@ const Calendar = {
   async render() {
     const { esc, statusPill } = window.App;
     const qs = this.buildQuery();
-    const [items, settings, stats, overview] = await Promise.all([
+    const [items, settings, stats, overview, insights] = await Promise.all([
       API.get('/calendar?' + qs),
       API.get('/calendar/settings'),
       API.get('/calendar/stats?' + qs),
       API.get('/calendar/stats/overview'),
+      API.get('/calendar/insights?' + qs),
     ]);
     this.state.items = items;
     this.state.stats = stats;
+    this.state.insights = insights;
     // 全量 facets 缓存（首次拉取全部投递计划聚合）
     if (!this._facets) {
       const allItems = await API.get('/calendar');
@@ -91,6 +93,16 @@ const Calendar = {
             <div class="chart-box"><div class="chart-title">英语要求</div><div class="chart" id="ch-english"></div></div>
             <div class="chart-box"><div class="chart-title">证书 / 技能要求</div><div class="chart" id="ch-cert"></div></div>
           </div>
+        </div>
+
+        <div class="card card-pad">
+          <div class="between wrap">
+            <div>
+              <div class="card-title">简历方向洞察</div>
+              <div class="card-sub" id="insight-sub">根据当前筛选岗位的真实需求，总结简历该往哪个方向写</div>
+            </div>
+          </div>
+          <div id="insight-body" class="mt16">${this.insightBodyHtml(insights)}</div>
         </div>
 
         <div class="card card-pad">
@@ -143,6 +155,11 @@ const Calendar = {
               ${a.major_requirement ? `<div>🎓 专业：${esc(a.major_requirement)}</div>` : ''}
             </div>
             ${a.note ? `<div class="small muted mt8">📌 ${esc(a.note)}</div>` : ''}
+            <div class="cal-links mt8">
+              ${a.company_url ? `<a class="link-pill" href="${esc(a.company_url)}" target="_blank" rel="noopener" title="公司官网/官方信息渠道">🌐 官网</a>` : ''}
+              ${a.apply_url ? `<a class="link-pill" href="${esc(a.apply_url)}" target="_blank" rel="noopener" title="招聘链接/官方公告">🚀 招聘链接</a>` : ''}
+              ${a.official_url && a.official_url !== a.apply_url ? `<a class="link-pill" href="${esc(a.official_url)}" target="_blank" rel="noopener" title="官方公告">📄 公告</a>` : ''}
+            </div>
           </div>
           <div style="text-align:right;display:flex;flex-direction:column;gap:8px;align-items:flex-end">
             <span class="deadline-chip ${d != null && d <= 3 ? 'dl-urgent' : d != null && d <= 7 ? 'dl-warn' : 'dl-normal'}">${dayLabel}</span>
@@ -158,6 +175,41 @@ const Calendar = {
       </div>`;
     }).join('') || window.App.emptyBox('没有符合筛选条件的投递项', '🗓');
     return timeline;
+  },
+
+  insightBodyHtml(ins) {
+    const { esc } = window.App;
+    if (!ins || !ins.tracks || !ins.tracks.length) {
+      return '<div class="small muted">当前筛选范围内暂无足够岗位数据生成建议，请调整筛选条件。</div>';
+    }
+    const max = ins.tracks[0].c || 1;
+    const bars = ins.tracks.slice(0, 6).map((t) => `
+      <div class="ins-bar-row">
+        <span class="ins-bar-label">${esc(t.k)}</span>
+        <div class="ins-bar"><div class="ins-bar-fill" style="width:${Math.round(t.c / max * 100)}%"></div></div>
+        <span class="ins-bar-count">${t.c}</span>
+      </div>`).join('');
+    const tags = (arr, cls) => (arr && arr.length
+      ? `<div class="tag-cloud">${arr.slice(0, 12).map((x) => `<span class="tag ${cls || ''}" title="${x.c} 个岗位">${esc(x.k)}<i>${x.c}</i></span>`).join('')}</div>`
+      : '<div class="small muted">未发现明确信息（以岗位详情为准）</div>');
+    return `
+      <div class="grid g-2">
+        <div class="ins-box">
+          <div class="ins-title">岗位方向分布</div>
+          <div class="mt8">${bars}</div>
+          <div class="small muted mt8">${ins.english && ins.english.length ? '🆎 英语：' + ins.english.map((e) => esc(e.k)).join('；') : ''}${ins.cert && ins.cert.length ? '　📜 证书：' + ins.cert.map((c) => esc(c.k)).join('；') : ''}</div>
+        </div>
+        <div class="ins-box">
+          <div class="ins-title">高频技能要求</div>
+          ${tags(ins.skills, 'tag-blue')}
+          <div class="ins-title mt12">偏好专业</div>
+          ${tags(ins.majors, 'tag-green')}
+        </div>
+      </div>
+      <div class="ins-suggestion mt16">
+        <div class="ins-title">💡 简历方向建议</div>
+        <div class="small mt8" style="white-space:pre-line;line-height:1.7">${esc(ins.suggestion || '')}</div>
+      </div>`;
   },
 
   condsHtml() {
@@ -202,18 +254,22 @@ const Calendar = {
     const update = async () => {
       const qs = this.buildQuery();
       try {
-        const [items, stats] = await Promise.all([
+        const [items, stats, insights] = await Promise.all([
           API.get('/calendar?' + qs),
           API.get('/calendar/stats?' + qs),
+          API.get('/calendar/insights?' + qs),
         ]);
         this.state.items = items;
         this.state.stats = stats;
+        this.state.insights = insights;
         const tl = rootEl.querySelector('#cal-timeline');
         if (tl) tl.innerHTML = this.timelineHtml(items);
         const cnt = rootEl.querySelector('#cal-count');
         if (cnt) cnt.textContent = '共 ' + stats.total + ' 个岗位';
         const sub = rootEl.querySelector('#stats-sub');
         if (sub) sub.textContent = '当前筛选 ' + stats.total + ' 个岗位的分布画像 · 英语/证书/技能来自官方公告（持续抓取中）';
+        const ib = rootEl.querySelector('#insight-body');
+        if (ib) ib.innerHTML = this.insightBodyHtml(insights);
         this.renderCharts(rootEl);
         this.bindTimeline(rootEl);
       } catch (err) { toast(err.message, 'err'); }
