@@ -14,7 +14,8 @@ const PORT = Number(process.env.PORT) || 3000;
 const app = express();
 
 app.use(express.json({ limit: '25mb' }));
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// 静态资源禁止缓存：本地工具站迭代频繁，避免浏览器加载旧版 JS/CSS
+app.use(express.static(path.join(__dirname, '..', 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-store') }));
 
 // 健康检查
 app.get('/api/health', (req, res) => res.json({ ok: true, name: '秋招作战台 v2', time: new Date().toISOString() }));
@@ -29,6 +30,7 @@ app.use('/api/experiences', require('./routes/experiences'));
 app.use('/api/interviews', require('./routes/interviews'));
 app.use('/api/knowledge', require('./routes/knowledge'));
 app.use('/api/dashboard', require('./routes/dashboard'));
+app.use('/api/profile', require('./routes/profile'));
 
 // 统一错误处理
 app.use((err, req, res, next) => {

@@ -11,10 +11,12 @@
     'experience': { title: '经历资产', desc: '简历自动拆解 · AI 教练深挖 · 素材沉淀', mod: Experience },
     'interview': { title: '面试作战', desc: '题库预测 · AI 模拟面试 · 复盘沉淀', mod: Interview },
     'knowledge': { title: '知识库', desc: '面经资料归档 · 搜索 · AI 问答', mod: Knowledge },
+    'match': { title: '智能匹配', desc: '上传简历 · 真实行业画像 · 一键联动雷达筛选', mod: ProfileMatch },
   };
   const NAV = [
     { id: 'dashboard', ico: '▦', label: '总览' },
     { id: 'radar', ico: '◎', label: '岗位雷达' },
+    { id: 'match', ico: '▣', label: '智能匹配' },
     { id: 'calendar', ico: '◷', label: '今日作战' },
     { id: 'resume', ico: '▤', label: '定制简历' },
     { id: 'experience', ico: '❖', label: '经历资产' },

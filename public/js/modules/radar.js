@@ -31,6 +31,25 @@ const Radar = {
 
   async render() {
     const { esc, deadlineChip, fmtSalary, statusPill } = window.App;
+    // 智能匹配页带入的行业筛选（localStorage 一次消费；替换已有行业条件，保证所选行业生效）
+    try {
+      const stored = localStorage.getItem('qiuzhao_match_industry');
+      if (stored) {
+        const inds = JSON.parse(stored);
+        if (Array.isArray(inds) && inds.length) {
+          this.state.filter.conditions = this.state.filter.conditions || [];
+          const idx = this.state.filter.conditions.findIndex((c) => c.f === 'industry');
+          if (idx >= 0) {
+            this.state.filter.conditions[idx].v = inds;
+            this.state.filter.conditions[idx].op = this.state.filter.conditions[idx].op || 'in';
+          } else {
+            this.state.filter.conditions.push({ f: 'industry', op: 'in', v: inds });
+          }
+          this.state.page = 1;
+        }
+        localStorage.removeItem('qiuzhao_match_industry');
+      }
+    } catch { /* ignore */ }
     this.state.facets = this.state.facets || (await API.get('/jobs/facets'));
     await this.load();
     const f = this.state.facets;
@@ -104,7 +123,7 @@ const Radar = {
       const ops = this.opsFor(meta.type);
       const needVal = this.isValueNeeded(c.op);
       const facetVals = (c.f && f[c.f]) ? f[c.f].map((x) => x.v) : [];
-      const selVals = Array.isArray(c.v) ? c.v.filter((v) => facetVals.includes(v)) : [];
+      const selVals = Array.isArray(c.v) ? c.v.filter((v) => v != null && String(v).trim() !== '') : [];
       const chips = selVals.map((v) => `<span class="f-chip" data-v="${esc(v)}">${esc(v)}<i data-rm="${esc(v)}">×</i></span>`).join('');
       const valueHtml = needVal
         ? (meta.type === 'text'
@@ -209,7 +228,8 @@ const Radar = {
           ${j.has_written_test ? '<div class="mt8 pill pill-amber">📝 该岗位包含笔试环节</div>' : ''}
           ${j.apply_url ? `<div class="mt8"><a class="btn btn-sm btn-primary" href="${esc(j.apply_url)}" target="_blank" rel="noopener">🚀 前往投递</a></div>` : ''}
           ${j.official_url ? `<div class="mt8 small"><a href="${esc(j.official_url)}" target="_blank" rel="noopener" style="color:var(--primary)">📄 查看官方公告 →</a></div>` : ''}
-          <div class="mt8 small muted">数据源：${esc(j.source || '')} · 同步于 ${esc(String(j.synced_at || '').slice(0, 16))}</div>
+          ${j.company_url ? `<div class="mt8 small"><a href="${esc(j.company_url)}" target="_blank" rel="noopener" style="color:var(--primary)">🌐 公司官网 →</a></div>` : ''}
+          <div class="mt8 small muted">${j.reliable ? '<span style="color:#16a34a;font-weight:600">✓ 官方来源</span> · ' : ''}数据源：${esc(j.source || '')} · 同步于 ${esc(String(j.synced_at || '').slice(0, 16))}</div>
         </div>
         <div class="modal-foot">
           ${j.in_plan ? `<span class="pill pill-blue">已在投递计划</span>` : `<button class="btn btn-primary" id="detail-add">＋ 加入投递计划</button>`}
@@ -432,7 +452,8 @@ const Radar = {
           ${j.has_written_test ? '<div class="mt8 pill pill-amber">📝 该岗位包含笔试环节</div>' : ''}
           ${j.apply_url ? `<div class="mt8"><a class="btn btn-sm btn-primary" href="${esc(j.apply_url)}" target="_blank" rel="noopener">🚀 前往投递</a></div>` : ''}
           ${j.official_url ? `<div class="mt8 small"><a href="${esc(j.official_url)}" target="_blank" rel="noopener" style="color:var(--primary)">📄 查看官方公告 →</a></div>` : ''}
-          <div class="mt8 small muted">数据源：${esc(j.source || '')} · 同步于 ${esc(String(j.synced_at || '').slice(0, 16))}</div>
+          ${j.company_url ? `<div class="mt8 small"><a href="${esc(j.company_url)}" target="_blank" rel="noopener" style="color:var(--primary)">🌐 公司官网 →</a></div>` : ''}
+          <div class="mt8 small muted">${j.reliable ? '<span style="color:#16a34a;font-weight:600">✓ 官方来源</span> · ' : ''}数据源：${esc(j.source || '')} · 同步于 ${esc(String(j.synced_at || '').slice(0, 16))}</div>
         </div>
         <div class="modal-foot">
           ${j.in_plan ? `<span class="pill pill-blue">已在投递计划</span>` : `<button class="btn btn-primary" id="detail-add">＋ 加入投递计划</button>`}

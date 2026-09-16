@@ -339,3 +339,19 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--in
   .stat-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
   .modal-body { max-height: 80vh; }
 }
+
+/* —— 智能匹配页 —— */
+.pm-textarea { width: 100%; min-height: 260px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px; font-size: 13px; line-height: 1.7; background: var(--surface); outline: none; resize: vertical; }
+.pm-textarea:focus { border-color: var(--brand); }
+.match-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 9px; transition: all .15s; box-shadow: var(--shadow); }
+.match-card:hover { border-color: rgba(37,99,235,.35); }
+.match-card.on { border-color: var(--brand); background: var(--brand-soft); }
+.match-head { display: flex; align-items: center; gap: 10px; }
+.match-check { display: flex; align-items: center; cursor: pointer; }
+.match-check input { accent-color: var(--brand); width: 16px; height: 16px; }
+.match-name { font-weight: 700; font-size: 14.5px; flex: 1; }
+.match-bar { height: 6px; border-radius: 99px; background: #e8edf5; overflow: hidden; }
+.match-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--brand), var(--sky)); }
+.match-meta { display: flex; flex-direction: column; gap: 6px; }
+.match-pct { font-size: 12px; font-weight: 700; color: var(--brand-deep); }
+.match-kws { display: flex; flex-wrap: wrap; gap: 4px; }
