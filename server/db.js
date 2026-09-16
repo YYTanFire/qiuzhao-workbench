@@ -166,6 +166,10 @@ const EXTRA_COLS = {
     ['company_url', "TEXT"],
     ['reliable', "INTEGER NOT NULL DEFAULT 0"],
     ['job_track', "TEXT"],
+    ['english_req', "TEXT"],
+    ['cert_req', "TEXT"],
+    ['skill_req', "TEXT"],
+    ['req_note', "TEXT"],
   ],
 };
 for (const [table, cols] of Object.entries(EXTRA_COLS)) {

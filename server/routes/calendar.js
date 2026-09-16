@@ -5,6 +5,7 @@
 const express = require('express');
 const { all, get, run, tx } = require('../db');
 const { requireAuth } = require('../auth');
+const { buildFilters } = require('./filters');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -43,19 +44,50 @@ router.put('/settings', (req, res) => {
   res.json({ warn_days: warn, urgent_days: urgent });
 });
 
-// 我的投递计划（含岗位信息，按截止日期升序）
+// 我的投递计划（含岗位信息，按截止日期升序；支持飞书式多条件组合筛选）
 router.get('/', (req, res) => {
-  const { status } = req.query;
+  const { status, filters, logic } = req.query;
   const settings = get('SELECT warn_days, urgent_days FROM user_settings WHERE user_id = ?', [req.user.id]) || { warn_days: 7, urgent_days: 3 };
-  const where = status && status !== 'all' ? 'AND a.status = ?' : '';
-  const params = status && status !== 'all' ? [req.user.id, status] : [req.user.id];
+  const conds = ['a.user_id = ?'];
+  const params = [req.user.id];
+  if (status && status !== 'all') { conds.push('a.status = ?'); params.push(status); }
+  if (filters) {
+    const f = buildFilters(filters, logic);
+    if (f.where) { conds.push(f.where); params.push(...f.params); }
+  }
   const rows = all(
     `SELECT a.id AS application_id, a.status, a.note, a.created_at AS applied_at, j.*
      FROM applications a JOIN jobs j ON j.id = a.job_id
-     WHERE a.user_id = ? ${where} ORDER BY CASE WHEN j.deadline = '' THEN 1 ELSE 0 END, j.deadline ASC, a.id DESC`,
+     WHERE ${conds.join(' AND ')} ORDER BY CASE WHEN j.deadline = '' THEN 1 ELSE 0 END, j.deadline ASC, a.id DESC`,
     params
   );
   res.json(attachLevels(rows, settings));
+});
+
+// 投递计划多维统计（与列表同一筛选口径）：行业/岗位方向/学历/地点/英语/证书/技能
+router.get('/stats', (req, res) => {
+  const { filters, logic } = req.query;
+  const conds = ['a.user_id = ?'];
+  const params = [req.user.id];
+  if (filters) {
+    const f = buildFilters(filters, logic);
+    if (f.where) { conds.push(f.where); params.push(...f.params); }
+  }
+  const where = `WHERE ${conds.join(' AND ')}`;
+  const stat = (expr, limit) => all(
+    `SELECT ${expr} AS k, COUNT(*) AS c FROM applications a JOIN jobs j ON j.id = a.job_id ${where} AND ${expr} IS NOT NULL AND ${expr} != '' GROUP BY ${expr} ORDER BY c DESC LIMIT ${limit}`,
+    params
+  );
+  res.json({
+    total: get(`SELECT COUNT(*) c FROM applications a JOIN jobs j ON j.id = a.job_id ${where}`, params).c,
+    industry: stat('j.industry', 10),
+    job_track: stat('j.job_track', 10),
+    education: stat('j.education_required', 8),
+    location: stat('j.location', 8),
+    english: stat('j.english_req', 6),
+    cert: stat('j.cert_req', 6),
+    skill: stat('j.skill_req', 6),
+  });
 });
 
 // 加入投递计划

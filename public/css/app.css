@@ -355,3 +355,9 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--in
 .match-meta { display: flex; flex-direction: column; gap: 6px; }
 .match-pct { font-size: 12px; font-weight: 700; color: var(--brand-deep); }
 .match-kws { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* —— 待投递多维分析 —— */
+.chart-box { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; min-height: 0; }
+.chart-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; color: var(--ink); }
+.chart { height: 220px; width: 100%; }
+.chart-empty { height: 220px; display: flex; align-items: center; justify-content: center; color: var(--ink-2); font-size: 12.5px; }
