@@ -1,6 +1,7 @@
 'use strict';
 /**
  * 模块 2：今日作战日历 —— 投递计划时间轴 + 飞书式多条件筛选 + 多维分析可视化
+ * 交互策略：筛选条件变化只做局部数据更新（列表/计数/图表），不重建整页，保留阅读位置
  */
 const Calendar = {
   state: { status: 'all', filter: { logic: 'and', conditions: [], keyword: '' } },
@@ -44,7 +45,7 @@ const Calendar = {
   },
 
   async render() {
-    const { esc, daysLeft, statusPill } = window.App;
+    const { esc, statusPill } = window.App;
     const qs = this.buildQuery();
     const [items, settings, stats, overview] = await Promise.all([
       API.get('/calendar?' + qs),
@@ -60,41 +61,6 @@ const Calendar = {
       const facet = (key) => { const m = new Map(); for (const a of allItems) { const v = a[key]; if (v && String(v).trim()) m.set(v, (m.get(v) || 0) + 1); } return Array.from(m.entries()).map(([v, c]) => ({ v, c })).sort((x, y) => y.c - x.c); };
       this._facets = { company_type: facet('company_type'), industry: facet('industry'), job_track: facet('job_track'), location: facet('location'), education_required: facet('education_required'), batch: facet('batch') };
     }
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-
-    const timeline = items.map((a) => {
-      const d = a.days_left;
-      const dateTxt = a.deadline ? `${a.deadline.slice(5, 7)}.${a.deadline.slice(8, 10)}` : '--';
-      const dayLabel = a.deadline ? (d == null ? '未知' : d < 0 ? `超 ${-d} 天` : d === 0 ? '今天' : `剩 ${d} 天`) : (a.deadline_text || '未知');
-      const cls = d != null && d < 0 ? 'expired' : a.alert_level === 'urgent' ? 'urgent' : a.alert_level === 'warn' ? 'warn' : '';
-      const done = ['offer', 'rejected'].includes(a.status);
-      return `
-      <div class="cal-item ${cls} ${done ? 'done' : ''}">
-        <div class="cal-card ${a.alert_level === 'urgent' ? 'urgent' : a.alert_level === 'warn' ? 'warn' : ''}">
-          <div class="cal-days"><b>${a.deadline ? dateTxt.split('.')[1] : '—'}</b><span>${a.deadline ? dateTxt.split('.')[0] + '月' : (a.deadline_text || '截止')}</span></div>
-          <div class="cal-main">
-            <div class="row" style="gap:8px"><span class="co">${esc(a.company)}</span>${statusPill(a.status)}${a.alert_level === 'urgent' ? '<span class="pill pill-red">紧急</span>' : a.alert_level === 'warn' ? '<span class="pill pill-amber">预警</span>' : ''}</div>
-            <div class="po">${esc(a.position)}</div>
-            <div class="lo">${esc(a.location || '')}${a.salary_min ? ' · ' + (a.salary_min) + '–' + (a.salary_max || a.salary_min) + 'K' : ''} · ${esc(a.education_required || '')} · ${esc(a.job_track || '')}</div>
-            <div class="small muted mt8">
-              ${a.english_req ? `🆎 英语：${esc(a.english_req)}　` : ''}${a.cert_req ? `📜 证书：${esc(a.cert_req)}　` : ''}${a.skill_req ? `🛠 技能：${esc(a.skill_req)}` : ''}
-              ${a.major_requirement ? `<div>🎓 专业：${esc(a.major_requirement)}</div>` : ''}
-            </div>
-            ${a.note ? `<div class="small muted mt8">📌 ${esc(a.note)}</div>` : ''}
-          </div>
-          <div style="text-align:right;display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-            <span class="deadline-chip ${d != null && d <= 3 ? 'dl-urgent' : d != null && d <= 7 ? 'dl-warn' : 'dl-normal'}">${dayLabel}</span>
-            <select class="status-select" data-status="${a.application_id}">
-              ${['planned', 'applied', 'written_test', 'interview', 'offer', 'rejected'].map((s) => `<option value="${s}" ${a.status === s ? 'selected' : ''}>${({ planned: '待投递', applied: '已投递', written_test: '笔试中', interview: '面试中', offer: '已拿 Offer', rejected: '已淘汰' })[s]}</option>`).join('')}
-            </select>
-            <div class="row" style="gap:6px">
-              <button class="btn btn-sm btn-ghost" data-note="${a.application_id}" title="备注">✎</button>
-              <button class="btn btn-sm btn-danger" data-del="${a.application_id}">移除</button>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    }).join('') || window.App.emptyBox('没有符合筛选条件的投递项', '🗓');
 
     const statCards = [
       ['计划总数', overview.total, ''],
@@ -114,7 +80,7 @@ const Calendar = {
           <div class="between wrap">
             <div>
               <div class="card-title">多维分析</div>
-              <div class="card-sub">当前筛选 ${stats.total} 个岗位的分布画像 · 英语/证书/技能来自官方公告（持续抓取中）</div>
+              <div class="card-sub" id="stats-sub">当前筛选 ${stats.total} 个岗位的分布画像 · 英语/证书/技能来自官方公告（持续抓取中）</div>
             </div>
           </div>
           <div class="grid g-2 mt16">
@@ -151,9 +117,47 @@ const Calendar = {
             <span class="small muted" id="cal-count">共 ${stats.total} 个岗位</span>
           </div>
           <div id="filter-conds" class="mt12">${this.condsHtml()}</div>
-          <div class="cal-timeline mt16">${timeline}</div>
+          <div class="cal-timeline mt16" id="cal-timeline">${this.timelineHtml(items)}</div>
         </div>
       </div>`;
+  },
+
+  timelineHtml(items) {
+    const { esc, statusPill } = window.App;
+    const timeline = items.map((a) => {
+      const d = a.days_left;
+      const dateTxt = a.deadline ? `${a.deadline.slice(5, 7)}.${a.deadline.slice(8, 10)}` : '--';
+      const dayLabel = a.deadline ? (d == null ? '未知' : d < 0 ? `超 ${-d} 天` : d === 0 ? '今天' : `剩 ${d} 天`) : (a.deadline_text || '未知');
+      const cls = d != null && d < 0 ? 'expired' : a.alert_level === 'urgent' ? 'urgent' : a.alert_level === 'warn' ? 'warn' : '';
+      const done = ['offer', 'rejected'].includes(a.status);
+      return `
+      <div class="cal-item ${cls} ${done ? 'done' : ''}">
+        <div class="cal-card ${a.alert_level === 'urgent' ? 'urgent' : a.alert_level === 'warn' ? 'warn' : ''}">
+          <div class="cal-days"><b>${a.deadline ? dateTxt.split('.')[1] : '—'}</b><span>${a.deadline ? dateTxt.split('.')[0] + '月' : (a.deadline_text || '截止')}</span></div>
+          <div class="cal-main">
+            <div class="row" style="gap:8px"><span class="co">${esc(a.company)}</span>${statusPill(a.status)}${a.alert_level === 'urgent' ? '<span class="pill pill-red">紧急</span>' : a.alert_level === 'warn' ? '<span class="pill pill-amber">预警</span>' : ''}</div>
+            <div class="po">${esc(a.position)}</div>
+            <div class="lo">${esc(a.location || '')}${a.salary_min ? ' · ' + (a.salary_min) + '–' + (a.salary_max || a.salary_min) + 'K' : ''} · ${esc(a.education_required || '')} · ${esc(a.job_track || '')}</div>
+            <div class="small muted mt8">
+              ${a.english_req ? `🆎 英语：${esc(a.english_req)}　` : ''}${a.cert_req ? `📜 证书：${esc(a.cert_req)}　` : ''}${a.skill_req ? `🛠 技能：${esc(a.skill_req)}` : ''}
+              ${a.major_requirement ? `<div>🎓 专业：${esc(a.major_requirement)}</div>` : ''}
+            </div>
+            ${a.note ? `<div class="small muted mt8">📌 ${esc(a.note)}</div>` : ''}
+          </div>
+          <div style="text-align:right;display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+            <span class="deadline-chip ${d != null && d <= 3 ? 'dl-urgent' : d != null && d <= 7 ? 'dl-warn' : 'dl-normal'}">${dayLabel}</span>
+            <select class="status-select" data-status="${a.application_id}">
+              ${['planned', 'applied', 'written_test', 'interview', 'offer', 'rejected'].map((s) => `<option value="${s}" ${a.status === s ? 'selected' : ''}>${({ planned: '待投递', applied: '已投递', written_test: '笔试中', interview: '面试中', offer: '已拿 Offer', rejected: '已淘汰' })[s]}</option>`).join('')}
+            </select>
+            <div class="row" style="gap:6px">
+              <button class="btn btn-sm btn-ghost" data-note="${a.application_id}" title="备注">✎</button>
+              <button class="btn btn-sm btn-danger" data-del="${a.application_id}">移除</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('') || window.App.emptyBox('没有符合筛选条件的投递项', '🗓');
+    return timeline;
   },
 
   condsHtml() {
@@ -192,30 +196,44 @@ const Calendar = {
   },
 
   async init(root) {
-    const { toast, openModal, closeModal, confirmDialog, esc } = window.App;
-    const refresh = async () => {
-      const pageRoot = document.getElementById('page-root');
-      pageRoot.innerHTML = '<div class="loading-box"><div class="spinner"></div></div>';
-      const html = await this.render();
-      pageRoot.innerHTML = html;
-      await this.init(pageRoot);
+    const { toast, openModal, closeModal, confirmDialog } = window.App;
+    const rootEl = root;
+    // 局部更新：只重拉列表+统计+图表，不动骨架
+    const update = async () => {
+      const qs = this.buildQuery();
+      try {
+        const [items, stats] = await Promise.all([
+          API.get('/calendar?' + qs),
+          API.get('/calendar/stats?' + qs),
+        ]);
+        this.state.items = items;
+        this.state.stats = stats;
+        const tl = rootEl.querySelector('#cal-timeline');
+        if (tl) tl.innerHTML = this.timelineHtml(items);
+        const cnt = rootEl.querySelector('#cal-count');
+        if (cnt) cnt.textContent = '共 ' + stats.total + ' 个岗位';
+        const sub = rootEl.querySelector('#stats-sub');
+        if (sub) sub.textContent = '当前筛选 ' + stats.total + ' 个岗位的分布画像 · 英语/证书/技能来自官方公告（持续抓取中）';
+        this.renderCharts(rootEl);
+        this.bindTimeline(rootEl);
+      } catch (err) { toast(err.message, 'err'); }
     };
+    this._update = update;
 
-    root.querySelector('#status-filter').addEventListener('change', (e) => { this.state.status = e.target.value; refresh(); });
-    root.querySelector('[data-logic]').addEventListener('change', (e) => { this.state.filter.logic = e.target.value; refresh(); });
-    root.querySelector('#add-cond').addEventListener('click', () => {
+    rootEl.querySelector('#status-filter').addEventListener('change', (e) => { this.state.status = e.target.value; update(); });
+    rootEl.querySelector('[data-logic]').addEventListener('change', (e) => { this.state.filter.logic = e.target.value; update(); });
+    rootEl.querySelector('#add-cond').addEventListener('click', () => {
       this.state.filter.conditions.push({ f: 'company_type', op: 'in', v: [] });
-      this.renderPanel(root);
+      this.renderPanel(rootEl);
     });
-    const clearBtn = root.querySelector('#clear-cond');
-    if (clearBtn) clearBtn.addEventListener('click', () => { this.state.filter.conditions = []; refresh(); });
+    const clearBtn = rootEl.querySelector('#clear-cond');
+    if (clearBtn) clearBtn.addEventListener('click', () => { this.state.filter.conditions = []; this.renderPanel(rootEl); update(); });
 
-    this.bindConds(root);
+    this.bindConds(rootEl);
+    this.bindTimeline(rootEl);
+    this.renderCharts(rootEl);
 
-    // 渲染图表
-    this.renderCharts(root);
-
-    root.querySelector('#set-btn').addEventListener('click', async () => {
+    rootEl.querySelector('#set-btn').addEventListener('click', async () => {
       const s = await API.get('/calendar/settings');
       const mask = openModal(`
         <div class="modal-head"><h3>预警阈值设置</h3><button class="modal-close" data-close>×</button></div>
@@ -233,26 +251,27 @@ const Calendar = {
           await API.put('/calendar/settings', { warn_days: mask.querySelector('#warn-days').value, urgent_days: mask.querySelector('#urgent-days').value });
           toast('预警阈值已更新', 'ok');
           closeModal(mask);
-          refresh();
         } catch (err) { toast(err.message, 'err'); }
       });
     });
+  },
 
-    root.querySelectorAll('[data-status]').forEach((sel) => sel.addEventListener('change', async () => {
-      try {
-        await API.patch('/applications/' + sel.dataset.status, { status: sel.value });
-        toast('状态已更新', 'ok');
-      } catch (err) { toast(err.message, 'err'); }
+  // 时间轴内事件（局部更新替换 innerHTML 后需重新绑定）
+  bindTimeline(root) {
+    const { toast, openModal, closeModal, confirmDialog } = window.App;
+    const tl = root.querySelector('#cal-timeline');
+    if (!tl) return;
+    tl.querySelectorAll('[data-status]').forEach((sel) => sel.addEventListener('change', async () => {
+      try { await API.patch('/applications/' + sel.dataset.status, { status: sel.value }); toast('状态已更新', 'ok'); }
+      catch (err) { toast(err.message, 'err'); }
     }));
-
-    root.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
+    tl.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
       confirmDialog('确定从投递计划中移除这条记录吗？（不会删除岗位本身）', async () => {
-        try { await API.del('/applications/' + b.dataset.del); toast('已移除', 'ok'); refresh(); }
+        try { await API.del('/applications/' + b.dataset.del); toast('已移除', 'ok'); this._update(); }
         catch (err) { toast(err.message, 'err'); }
       });
     }));
-
-    root.querySelectorAll('[data-note]').forEach((b) => b.addEventListener('click', async () => {
+    tl.querySelectorAll('[data-note]').forEach((b) => b.addEventListener('click', async () => {
       const mask = openModal(`
         <div class="modal-head"><h3>编辑备注</h3><button class="modal-close" data-close>×</button></div>
         <div class="modal-body"><div class="field"><label>备注</label><textarea id="note-text" placeholder="例如：笔试前刷 3 套行测 / 联系内推人"></textarea></div></div>
@@ -263,24 +282,19 @@ const Calendar = {
           await API.patch('/applications/' + b.dataset.note, { note: mask.querySelector('#note-text').value });
           toast('备注已保存', 'ok');
           closeModal(mask);
-          refresh();
+          this._update();
         } catch (err) { toast(err.message, 'err'); }
       });
     }));
   },
 
-  // 条件区交互：字段/运算符切换、多选浮层、文本输入、删除
+  // 条件区交互：字段/运算符切换、多选浮层、文本输入、删除（全部局部更新，不整页刷新）
   bindConds(root) {
     const { esc } = window.App;
-    const refreshList = async () => {
-      const pageRoot = document.getElementById('page-root');
-      pageRoot.innerHTML = '<div class="loading-box"><div class="spinner"></div></div>';
-      const html = await this.render();
-      pageRoot.innerHTML = html;
-      await this.init(pageRoot);
-    };
+    const condsWrap = root.querySelector('#filter-conds');
+    const update = () => this._update();
 
-    root.querySelector('#filter-conds').addEventListener('change', (e) => {
+    condsWrap.addEventListener('change', (e) => {
       const el = e.target;
       const ci = Number(el.dataset.ci);
       const cond = this.state.filter.conditions[ci];
@@ -288,17 +302,16 @@ const Calendar = {
       if (el.classList.contains('f-field')) {
         const meta = this.FIELD_META[el.value];
         cond.f = el.value; cond.op = this.opsFor(meta.type)[0]; cond.v = [];
-        refreshList();
-        return;
+        this.renderPanel(root);
+        update();
       } else if (el.classList.contains('f-op')) {
         cond.op = el.value;
         if (!this.isValueNeeded(el.value)) cond.v = [];
-        refreshList();
-        return;
+        this.renderPanel(root);
+        update();
       } else if (el.classList.contains('f-text')) {
         cond.v = el.value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean);
-        this.state.page = 1;
-        this.debouncedRefresh(1200, refreshList);
+        this.debouncedRefresh(update, 600);
       } else if (el.type === 'checkbox') {
         const vals = cond.v || [];
         cond.v = el.checked ? Array.from(new Set([...vals, el.value])) : vals.filter((v) => v !== el.value);
@@ -308,26 +321,25 @@ const Calendar = {
           const selVals = (cond.v || []).filter((v) => facetVals.includes(v));
           msBtn.innerHTML = selVals.map((v) => `<span class="f-chip" data-v="${esc(v)}">${esc(v)}<i data-rm="${esc(v)}">×</i></span>`).join('') || '<span class="muted">选择值… ▾</span>';
         }
-        this.debouncedRefresh(500, refreshList);
+        this.debouncedRefresh(update, 400);
       }
     });
 
-    root.querySelector('#filter-conds').addEventListener('input', (e) => {
+    condsWrap.addEventListener('input', (e) => {
       const el = e.target;
       if (!el.classList.contains('f-text')) return;
       const ci = Number(el.dataset.ci);
       const cond = this.state.filter.conditions[ci];
       if (!cond) return;
-      clearTimeout(this._textTimer);
-      this._textTimer = setTimeout(() => {
+      this.debouncedRefresh(() => {
         cond.v = el.value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean);
-        refreshList();
+        update();
       }, 600);
     });
 
-    root.querySelector('#filter-conds').addEventListener('click', (e) => {
+    condsWrap.addEventListener('click', (e) => {
       const del = e.target.closest('.f-del');
-      if (del) { this.state.filter.conditions.splice(Number(del.dataset.ci), 1); this.renderPanel(root); refreshList(); return; }
+      if (del) { this.state.filter.conditions.splice(Number(del.dataset.ci), 1); this.renderPanel(root); update(); return; }
       const rm = e.target.closest('[data-rm]');
       if (rm) {
         const ci = Number(rm.closest('.f-ms') ? rm.closest('.f-ms').dataset.ci : -1);
@@ -335,7 +347,7 @@ const Calendar = {
         if (!cond) return;
         cond.v = (cond.v || []).filter((v) => v !== rm.dataset.rm);
         this.renderPanel(root);
-        refreshList();
+        update();
         return;
       }
       const btn = e.target.closest('.f-ms-btn');
@@ -343,88 +355,90 @@ const Calendar = {
         const ci = Number(btn.dataset.ci);
         const pop = root.querySelector(`.f-ms-pop[data-ci="${ci}"]`);
         if (pop) pop.hidden = !pop.hidden;
-        // 关闭其他浮层
         root.querySelectorAll('.f-ms-pop:not([hidden])').forEach((p) => { if (p !== pop) p.hidden = true; });
         return;
       }
-      // 点击条件区外部关闭浮层
       if (!e.target.closest('.f-ms')) root.querySelectorAll('.f-ms-pop').forEach((p) => { p.hidden = true; });
     });
   },
 
-  debouncedRefresh(delay, fn) {
+  debouncedRefresh(fn, delay) {
     clearTimeout(this._deb);
     this._deb = setTimeout(fn, delay);
   },
 
-  // 仅重渲条件面板（不重建整页，保持浮层状态）
+  // 仅重渲条件面板（不刷新列表数据，保持浮层/输入焦点所在行）
   renderPanel(root) {
     const condsWrap = root.querySelector('#filter-conds');
     if (condsWrap) condsWrap.innerHTML = this.condsHtml();
   },
 
-  // ECharts 图表渲染
+  // ECharts 图表渲染（实例复用：容器不重建，仅 setOption，保持无闪烁）
   renderCharts(root) {
-    if (!window.echarts) { return; }
+    if (!window.echarts) return;
     const stats = this.state.stats || {};
     const palette = ['#2563eb', '#0ea5e9', '#16a34a', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#64748b', '#f97316'];
+    const empty = (chart, text) => { chart.clear(); chart.setOption({ title: { text, left: 'center', top: 'middle', textStyle: { fontSize: 13, color: '#94a3b8' } } }); };
 
-    const pie = (id, data, name) => {
+    const pie = (id, data) => {
       const el = root.querySelector('#' + id);
       if (!el) return;
       const top = (data || []).slice(0, 8);
       const other = (data || []).slice(8).reduce((s, x) => s + x.c, 0);
       const items = top.map((x, i) => ({ name: x.k, value: x.c, itemStyle: { color: palette[i % palette.length] } }));
       if (other > 0) items.push({ name: '其他', value: other, itemStyle: { color: '#cbd5e1' } });
-      if (!items.length) { el.innerHTML = '<div class="chart-empty">暂无数据</div>'; return; }
       el._chart = el._chart || window.echarts.init(el);
+      if (!items.length) { empty(el._chart, '暂无数据'); return; }
       el._chart.setOption({
         tooltip: { trigger: 'item', triggerOn: 'click', renderMode: 'richText', confine: true, formatter: function (p) { return p.name + '：' + p.value + ' 个（' + p.percent + '%）'; } },
         legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 11 } },
         series: [{ type: 'pie', radius: ['35%', '68%'], center: ['50%', '44%'], data: items, label: { fontSize: 11, formatter: '{b} {d}%' } }],
-      });
+      }, true);
     };
     const bar = (id, data) => {
       const el = root.querySelector('#' + id);
       if (!el) return;
       const rows = (data || []).slice(0, 8);
-      if (!rows.length) { el.innerHTML = '<div class="chart-empty">暂无数据</div>'; return; }
+      el._chart = el._chart || window.echarts.init(el);
+      if (!rows.length) { empty(el._chart, '暂无数据'); return; }
       const names = rows.map((x) => x.k);
       const vals = rows.map((x) => x.c);
-      el._chart = el._chart || window.echarts.init(el);
       el._chart.setOption({
         tooltip: { trigger: 'axis', triggerOn: 'click', renderMode: 'richText', confine: true },
         grid: { left: 8, right: 24, top: 20, bottom: 8, containLabel: true },
         xAxis: { type: 'category', data: names, axisLabel: { fontSize: 10, interval: 0, rotate: names.length > 4 ? 24 : 0 } },
         yAxis: { type: 'value', minInterval: 1 },
         series: [{ type: 'bar', data: vals.map((v, i) => ({ value: v, itemStyle: { color: palette[i % palette.length] } })), barWidth: '52%', label: { show: true, position: 'top', fontSize: 10 } }],
-      });
+      }, true);
     };
 
-    pie('ch-industry', stats.industry, '行业');
+    pie('ch-industry', stats.industry);
     bar('ch-track', stats.job_track);
     bar('ch-edu', stats.education);
     bar('ch-loc', stats.location);
+
     const eng = (stats.english || []);
     const cert = (stats.cert || []);
     const skill = (stats.skill || []);
-    if (!eng.length) { const el = root.querySelector('#ch-english'); if (el) el.innerHTML = '<div class="chart-empty">抓取中…官方公告要求持续解析中</div>'; }
-    else pie('ch-english', eng, '英语');
+    const elEng = root.querySelector('#ch-english');
+    if (elEng) {
+      elEng._chart = elEng._chart || window.echarts.init(elEng);
+      if (!eng.length) { empty(elEng._chart, '暂无数据'); }
+      else pie('ch-english', eng);
+    }
     const elCert = root.querySelector('#ch-cert');
     if (elCert) {
-      if (!cert.length && !skill.length) elCert.innerHTML = '<div class="chart-empty">抓取中…官方公告要求持续解析中</div>';
-      else {
-        elCert._chart = elCert._chart || window.echarts.init(elCert);
-        const names = [...cert.map((x) => '证:' + x.k), ...skill.map((x) => '技:' + x.k)].slice(0, 10);
-        const vals = [...cert.map((x) => x.c), ...skill.map((x) => x.c)].slice(0, 10);
-        elCert._chart.setOption({
-          tooltip: { trigger: 'axis', triggerOn: 'click', renderMode: 'richText', confine: true },
-          grid: { left: 8, right: 24, top: 20, bottom: 8, containLabel: true },
-          xAxis: { type: 'category', data: names, axisLabel: { fontSize: 10, interval: 0, rotate: 30 } },
-          yAxis: { type: 'value', minInterval: 1 },
-          series: [{ type: 'bar', data: vals.map((v, i) => ({ value: v, itemStyle: { color: palette[i % palette.length] } })), barWidth: '52%', label: { show: true, position: 'top', fontSize: 10 } }],
-        });
-      }
+      elCert._chart = elCert._chart || window.echarts.init(elCert);
+      if (!cert.length && !skill.length) { empty(elCert._chart, '暂无数据'); return; }
+      const names = [...cert.map((x) => '证:' + x.k), ...skill.map((x) => '技:' + x.k)].slice(0, 10);
+      const vals = [...cert.map((x) => x.c), ...skill.map((x) => x.c)].slice(0, 10);
+      elCert._chart.setOption({
+        tooltip: { trigger: 'axis', triggerOn: 'click', renderMode: 'richText', confine: true },
+        grid: { left: 8, right: 24, top: 20, bottom: 8, containLabel: true },
+        xAxis: { type: 'category', data: names, axisLabel: { fontSize: 10, interval: 0, rotate: 30 } },
+        yAxis: { type: 'value', minInterval: 1 },
+        series: [{ type: 'bar', data: vals.map((v, i) => ({ value: v, itemStyle: { color: palette[i % palette.length] } })), barWidth: '52%', label: { show: true, position: 'top', fontSize: 10 } }],
+      }, true);
     }
   },
 };
