@@ -72,6 +72,30 @@ router.post('/', (req, res) => {
   }
 });
 
+// 批量加入投递计划（按行业，与岗位雷达口径一致：仅未过期岗位；幂等跳过已加入）
+router.post('/batch', (req, res) => {
+  const { industries } = req.body || {};
+  const list = Array.isArray(industries) ? industries.map((x) => String(x).trim()).filter(Boolean) : [];
+  if (!list.length) return res.status(400).json({ error: '请提供至少一个行业' });
+  const EXPIRED = "(deadline >= date('now','localtime') OR deadline = '')";
+  const ors = list.map(() => 'industry LIKE ?').join(' OR ');
+  const params = list.map((x) => `%${x}%`);
+  const rows = all(`SELECT id FROM jobs WHERE ${EXPIRED} AND (${ors})`, params);
+  try {
+    const inserted = tx(() => {
+      let n = 0;
+      for (const row of rows) {
+        const x = run('INSERT OR IGNORE INTO applications (user_id, job_id) VALUES (?, ?)', [req.user.id, row.id]);
+        if (x.changes > 0) n++;
+      }
+      return n;
+    });
+    res.json({ ok: true, total: rows.length, inserted, skipped: rows.length - inserted });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // 更新状态/备注
 router.patch('/:id', (req, res) => {
   const { status, note } = req.body || {};

@@ -14,6 +14,13 @@ const PORT = Number(process.env.PORT) || 3000;
 const app = express();
 
 app.use(express.json({ limit: '25mb' }));
+// 静态资源版本号：服务启动时生成，动态注入 index.html 的 @VER@ 占位符，避免浏览器缓存旧版 JS/CSS
+const STATIC_VER = Date.now().toString(36);
+app.get(['/', '/index.html'], (req, res) => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8').replace(/@VER@/g, STATIC_VER);
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('html').send(html);
+});
 // 静态资源禁止缓存：本地工具站迭代频繁，避免浏览器加载旧版 JS/CSS
 app.use(express.static(path.join(__dirname, '..', 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-store') }));
 

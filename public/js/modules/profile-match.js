@@ -23,7 +23,10 @@ const ProfileMatch = {
         </div>
         <div class="between">
           <span class="small muted">命中 ${x.keywords.length} 项技能关键词</span>
-          <button class="btn btn-sm btn-primary" data-go="${esc(x.industry)}">去筛选 →</button>
+          <div class="row" style="gap:6px">
+            <button class="btn btn-sm" data-batch-add="${esc(x.industry)}" title="把该行业全部岗位一键加入投递计划">⏳ 待投递</button>
+            <button class="btn btn-sm btn-primary" data-go="${esc(x.industry)}">去筛选 →</button>
+          </div>
         </div>
       </div>`).join('');
 
@@ -57,7 +60,10 @@ const ProfileMatch = {
           <div class="card card-pad">
             <div class="between">
               <h4 style="margin:0">② 推荐行业（真实岗位分布）</h4>
-              <button class="btn btn-sm btn-primary" id="pm-go-radar" ${this.state.selected.length ? '' : 'disabled'}>在岗位雷达中筛选 (${this.state.selected.length})</button>
+              <div class="row" style="gap:8px">
+                <button class="btn btn-sm" id="pm-batch-plan" ${this.state.selected.length ? '' : 'disabled'} title="把已勾选行业的全部岗位一键加入投递计划">⏳ 一键待投递 (${this.state.selected.length})</button>
+                <button class="btn btn-sm btn-primary" id="pm-go-radar" ${this.state.selected.length ? '' : 'disabled'}>在岗位雷达中筛选 (${this.state.selected.length})</button>
+              </div>
             </div>
             <div class="mt12" id="pm-result">
               ${ind.length ? `<div class="grid g-2">${cards}</div>` : emptyBox('上传简历并点击「生成我的行业画像」，这里会显示与你匹配的行业', '🎯')}
@@ -152,15 +158,40 @@ const ProfileMatch = {
       const card = e.target.closest('.match-card');
       if (card) card.classList.toggle('on', this.state.selected.includes(ind));
       const go = root.querySelector('#pm-go-radar');
+      const bp = root.querySelector('#pm-batch-plan');
       if (go) { go.disabled = !this.state.selected.length; go.textContent = `在岗位雷达中筛选 (${this.state.selected.length})`; }
+      if (bp) { bp.disabled = !this.state.selected.length; bp.textContent = `⏳ 一键待投递 (${this.state.selected.length})`; }
     });
 
-    // 单个行业去筛选
-    root.querySelector('#pm-result').addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-go]');
-      if (!btn) return;
-      localStorage.setItem('qiuzhao_match_industry', JSON.stringify([btn.dataset.go]));
+    // 单个行业一键待投递 / 去筛选
+    root.querySelector('#pm-result').addEventListener('click', async (e) => {
+      const addBtn = e.target.closest('[data-batch-add]');
+      if (addBtn) {
+        const ind = addBtn.dataset.batchAdd;
+        addBtn.disabled = true; addBtn.textContent = '加入中…';
+        try {
+          const r = await API.post('/applications/batch', { industries: [ind] });
+          toast(`已将 ${r.inserted} 个「${ind}」岗位加入投递计划${r.skipped ? `（${r.skipped} 个已在计划中）` : ''} 🎯`, 'ok');
+        } catch (err) { toast(err.message, 'err'); }
+        addBtn.disabled = false; addBtn.textContent = '⏳ 待投递';
+        return;
+      }
+      const go = e.target.closest('[data-go]');
+      if (!go) return;
+      localStorage.setItem('qiuzhao_match_industry', JSON.stringify([go.dataset.go]));
       location.hash = '#/radar';
+    });
+
+    // 多选行业一键待投递
+    root.querySelector('#pm-batch-plan').addEventListener('click', async () => {
+      if (!this.state.selected.length) return toast('请先勾选行业', 'err');
+      const btn = root.querySelector('#pm-batch-plan');
+      btn.disabled = true; const old = btn.textContent;
+      try {
+        const r = await API.post('/applications/batch', { industries: this.state.selected });
+        toast(`已将 ${r.inserted} 个岗位加入投递计划${r.skipped ? `（${r.skipped} 个已在计划中）` : ''} 🎯`, 'ok');
+      } catch (err) { toast(err.message, 'err'); }
+      btn.disabled = false; btn.textContent = old;
     });
 
     // 多选行业去雷达

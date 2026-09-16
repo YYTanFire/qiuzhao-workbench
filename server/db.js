@@ -163,6 +163,9 @@ const EXTRA_COLS = {
     ['official_url', "TEXT"],
     ['apply_url', "TEXT"],
     ['is_demo', "INTEGER NOT NULL DEFAULT 0"],
+    ['company_url', "TEXT"],
+    ['reliable', "INTEGER NOT NULL DEFAULT 0"],
+    ['job_track', "TEXT"],
   ],
 };
 for (const [table, cols] of Object.entries(EXTRA_COLS)) {
