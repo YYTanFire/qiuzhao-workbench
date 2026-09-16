@@ -5,6 +5,12 @@ data/*.db-shm
 data/jobs-source.json
 data/feishu-jobs.json
 data/.secret
+# 各数据源抓取缓存（可重新抓取生成，不入库）
+data/*.json
+data/*-raw.json
+data/*-raw.html
+data/*.html
+data/*.bak*
 .env
 *.log
 .DS_Store

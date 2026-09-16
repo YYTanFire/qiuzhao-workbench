@@ -13,6 +13,7 @@ const DB_PATH = path.join(DATA_DIR, 'qiuzhao.db');
 
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');
+db.exec('PRAGMA busy_timeout = 15000;');
 db.exec('PRAGMA foreign_keys = ON;');
 
 const SCHEMA = `
