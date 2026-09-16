@@ -85,6 +85,16 @@ const Radar = {
 
     return `
       <div class="stack">
+        <div class="card card-pad">
+          <div class="card-title">💬 需求描述</div>
+          <div class="card-sub">把你这几年做过的东西 / 技能 / 意向写进去，自动解析成筛选条件，与你手选的筛选条件共同生效</div>
+          <div class="row" style="gap:8px;align-items:flex-start">
+            <textarea id="intent-text" placeholder="例如：我做过嵌入式开发和FPGA验证，熟悉Verilog、C++，研究生方向是光纤传感和深度学习，会写测试用例…" style="flex:1;min-height:64px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius);font-size:13px">${esc(this.state.intent ? this.state.intent.text : '')}</textarea>
+            <button class="btn btn-sm btn-primary" id="intent-btn" style="align-self:stretch">🎯 解析需求</button>
+          </div>
+          <div id="intent-results" class="mt12">${this.intentResultsHtml()}</div>
+        </div>
+
         <div class="card card-pad" id="filter-panel">
           <div class="between wrap">
             <div class="filter-bar">
@@ -196,6 +206,7 @@ const Radar = {
 
     this.bindConds(root);
     this.bindPanelActions(root);
+    this.bindIntent(root);
 
     root.querySelector('#prev-page').addEventListener('click', () => { this.state.page--; this.refresh(root); });
     root.querySelector('#next-page').addEventListener('click', () => { this.state.page++; this.refresh(root); });
@@ -348,6 +359,108 @@ const Radar = {
         root.querySelectorAll('.f-ms-pop').forEach((p) => { p.hidden = true; });
       }
     });
+  },
+
+  // 需求解析结果区：可勾选的条件候选
+  intentResultsHtml() {
+    const { esc } = window.App;
+    const p = this.state.intent && this.state.intent.parsed;
+    if (!p) return '';
+    const cands = [];
+    if (p.industry) cands.push({ id: 'industry', label: p.industry.label, value: p.industry.v[0], count: p.industry.count, reason: p.industry.reason });
+    (p.tracks || []).forEach((t, i) => cands.push({ id: 'track:' + i, label: t.label, value: t.v[0], count: t.count, reason: t.reason }));
+    if (p.majors) cands.push({ id: 'majors', label: p.majors.label, value: p.majors.v.join('、'), count: p.majors.count, reason: p.majors.reason });
+    if (!cands.length) return '<div class="small muted">未能从文字中识别出条件，请补充更具体的经历 / 技能 / 行业词。</div>';
+    const checked = this.state.intent.checked || { industry: true, majors: true };
+    return `
+      <div class="small muted mb8">识别到以下条件（取消勾选可放宽），点「应用」后与现有筛选共同生效：</div>
+      <div class="intent-cands">
+        ${cands.map((c) => `
+          <label class="intent-cand">
+            <input type="checkbox" data-cand="${c.id}" ${checked[c.id] !== false ? 'checked' : ''}>
+            <b>${esc(c.label)}：</b>${esc(c.value)} <span class="muted">${c.count} 岗</span>
+            <span class="intent-reason">${esc(c.reason)}</span>
+          </label>`).join('')}
+      </div>
+      <div class="row mt8">
+        <button class="btn btn-sm btn-primary" id="intent-apply">✔ 应用勾选条件</button>
+        <button class="btn btn-sm btn-ghost" id="intent-clear">✖ 清除本次解析</button>
+      </div>`;
+  },
+
+  // 结果区按钮绑定（解析完成后 / 整页重建后都要调用，靠 _bound 防重复）
+  bindIntentButtons(root) {
+    const { toast } = window.App;
+    const applyBtn = root.querySelector('#intent-apply');
+    if (applyBtn && !applyBtn._bound) {
+      applyBtn._bound = true;
+      applyBtn.addEventListener('click', () => this.applyIntent(root));
+    }
+    const clearBtn = root.querySelector('#intent-clear');
+    if (clearBtn && !clearBtn._bound) {
+      clearBtn._bound = true;
+      clearBtn.addEventListener('click', () => {
+        this.state.intent = null;
+        const b2 = root.querySelector('#intent-results');
+        if (b2) b2.innerHTML = '';
+      });
+    }
+  },
+
+  // 绑定需求描述解析交互（refresh 重建后 init 会重调，靠 _bound 防重复）
+  bindIntent(root) {
+    const { toast } = window.App;
+    const btn = root.querySelector('#intent-btn');
+    if (btn && !btn._bound) {
+      btn._bound = true;
+      btn.addEventListener('click', async () => {
+        const ta = root.querySelector('#intent-text');
+        const text = (ta && ta.value || '').trim();
+        if (text.length < 2) { toast('请先输入你的经历或需求描述', 'err'); return; }
+        btn.disabled = true; btn.textContent = '解析中…';
+        try {
+          const r = await API.post('/jobs/parse-intent', { text });
+          this.state.intent = { text, parsed: r, checked: { industry: true, majors: true } };
+          const box = root.querySelector('#intent-results');
+          if (box) box.innerHTML = this.intentResultsHtml();
+          this.bindIntentButtons(root);
+          toast('解析完成，勾选条件后点击「应用」', 'ok');
+        } catch (err) { toast(err.message, 'err'); }
+        btn.disabled = false; btn.textContent = '🎯 解析需求';
+      });
+    }
+    this.bindIntentButtons(root);
+  },
+
+  // 应用勾选的条件到筛选面板（同字段替换，其余追加），与现有筛选共同生效
+  async applyIntent(root) {
+    const { toast } = window.App;
+    const p = this.state.intent && this.state.intent.parsed;
+    if (!p) return;
+    const checked = {};
+    root.querySelectorAll('[data-cand]').forEach((cb) => { checked[cb.dataset.cand] = cb.checked; });
+    this.state.intent.checked = checked;
+    const conds = [];
+    if (p.industry && checked.industry) conds.push({ f: 'industry', op: 'in', v: p.industry.v });
+    (p.tracks || []).forEach((t, i) => { if (checked['track:' + i]) conds.push({ f: 'job_track', op: 'in', v: t.v }); });
+    if (p.majors && checked.majors) conds.push({ f: 'major_requirement', op: 'in', v: p.majors.v });
+    if (!conds.length) { toast('请至少勾选一个条件', 'err'); return; }
+    // 同字段合并为「包含任意」多值条件（如两个岗位方向 → job_track 包含[研发,测试]），避免 AND 互斥
+    const byField = {};
+    for (const c of conds) {
+      if (byField[c.f]) byField[c.f].v = Array.from(new Set([...byField[c.f].v, ...c.v]));
+      else byField[c.f] = { f: c.f, op: 'in', v: [...c.v] };
+    }
+    const merged = Object.values(byField);
+    this.state.filter.conditions = this.state.filter.conditions || [];
+    for (const c of merged) {
+      const idx = this.state.filter.conditions.findIndex((x) => x.f === c.f);
+      if (idx >= 0) this.state.filter.conditions[idx] = c;
+      else this.state.filter.conditions.push(c);
+    }
+    this.state.page = 1;
+    toast(`已应用 ${merged.length} 组条件，与现有筛选共同生效`, 'ok');
+    await this.refresh(root);
   },
 
   // 绑定筛选面板动作（同步 / 一键投递）；面板重建后需重新绑定，用 _bound 防重复

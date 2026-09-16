@@ -127,6 +127,9 @@ const Calendar = {
             <button class="btn btn-sm" id="add-cond">＋ 添加筛选条件</button>
             <button class="btn btn-sm btn-ghost" id="clear-cond">清空条件</button>
             <span class="small muted" id="cal-count">共 ${stats.total} 个岗位</span>
+            <span style="flex:1"></span>
+            <button class="btn btn-sm btn-danger" id="del-filter" title="删除当前筛选出的所有投递记录">🗑 删除当前筛选 (${stats.total})</button>
+            <button class="btn btn-sm btn-danger btn-ghost" id="del-all" title="清空全部投递记录">🗑 清空全部</button>
           </div>
           <div id="filter-conds" class="mt12">${this.condsHtml()}</div>
           <div class="cal-timeline mt16" id="cal-timeline">${this.timelineHtml(items)}</div>
@@ -250,6 +253,15 @@ const Calendar = {
   async init(root) {
     const { toast, openModal, closeModal, confirmDialog } = window.App;
     const rootEl = root;
+    // 整页重建（删除等需要重置面板状态时用）
+    const refreshTo = async () => {
+      const pageRoot = document.getElementById('page-root');
+      pageRoot.innerHTML = '<div class="loading-box"><div class="spinner"></div></div>';
+      const html = await this.render();
+      pageRoot.innerHTML = html;
+      await this.init(pageRoot);
+    };
+    this._refreshTo = refreshTo;
     // 局部更新：只重拉列表+统计+图表，不动骨架
     const update = async () => {
       const qs = this.buildQuery();
@@ -266,6 +278,8 @@ const Calendar = {
         if (tl) tl.innerHTML = this.timelineHtml(items);
         const cnt = rootEl.querySelector('#cal-count');
         if (cnt) cnt.textContent = '共 ' + stats.total + ' 个岗位';
+        const delf = rootEl.querySelector('#del-filter');
+        if (delf) delf.textContent = '🗑 删除当前筛选 (' + stats.total + ')';
         const sub = rootEl.querySelector('#stats-sub');
         if (sub) sub.textContent = '当前筛选 ' + stats.total + ' 个岗位的分布画像 · 英语/证书/技能来自官方公告（持续抓取中）';
         const ib = rootEl.querySelector('#insight-body');
@@ -284,6 +298,34 @@ const Calendar = {
     });
     const clearBtn = rootEl.querySelector('#clear-cond');
     if (clearBtn) clearBtn.addEventListener('click', () => { this.state.filter.conditions = []; this.renderPanel(rootEl); update(); });
+
+    // 按当前条件删除
+    const delFilterBtn = rootEl.querySelector('#del-filter');
+    if (delFilterBtn) delFilterBtn.addEventListener('click', () => {
+      const qs = this.buildQuery();
+      const total = (this.state.stats && this.state.stats.total) || 0;
+      if (!total) { toast('当前筛选下没有可删除的记录', 'err'); return; }
+      confirmDialog(`确定删除当前筛选出的 <b>${total}</b> 条投递记录吗？此操作不可恢复。`, async () => {
+        try {
+          const r = await API.del('/applications?' + qs);
+          toast(`已删除 ${r.deleted} 条投递记录`, 'ok');
+          this.state.filter.conditions = []; this.state.status = 'all';
+          await refreshTo();
+        } catch (err) { toast(err.message, 'err'); }
+      });
+    });
+    // 清空全部
+    const delAllBtn = rootEl.querySelector('#del-all');
+    if (delAllBtn) delAllBtn.addEventListener('click', () => {
+      confirmDialog('确定<b>清空全部</b>投递记录吗？此操作不可恢复。', async () => {
+        try {
+          const r = await API.del('/applications/all');
+          toast(`已清空 ${r.deleted} 条投递记录`, 'ok');
+          this.state.filter.conditions = []; this.state.status = 'all';
+          await refreshTo();
+        } catch (err) { toast(err.message, 'err'); }
+      });
+    });
 
     this.bindConds(rootEl);
     this.bindTimeline(rootEl);

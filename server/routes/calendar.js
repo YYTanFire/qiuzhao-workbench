@@ -90,6 +90,33 @@ router.get('/stats', (req, res) => {
   });
 });
 
+// 清空全部投递计划
+router.delete('/all', (req, res) => {
+  const n = run('DELETE FROM applications WHERE user_id = ?', [req.user.id]).changes;
+  res.json({ ok: true, deleted: n });
+});
+
+// 按筛选条件删除投递计划（与列表同一筛选口径）
+router.delete('/', (req, res) => {
+  const { filters, logic } = req.query;
+  const conds = ['a.user_id = ?'];
+  const params = [req.user.id];
+  if (filters) {
+    const f = buildFilters(filters, logic);
+    if (f.where) { conds.push(f.where); params.push(...f.params); }
+  }
+  if (conds.length === 1) return res.status(400).json({ error: '请提供筛选条件' });
+  try {
+    const n = run(
+      `DELETE FROM applications WHERE id IN (SELECT a.id FROM applications a JOIN jobs j ON j.id = a.job_id WHERE ${conds.join(' AND ')})`,
+      params
+    ).changes;
+    res.json({ ok: true, deleted: n });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // 加入投递计划
 router.post('/', (req, res) => {
   const { job_id } = req.body || {};
