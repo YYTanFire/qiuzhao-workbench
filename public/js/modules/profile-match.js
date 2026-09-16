@@ -45,7 +45,8 @@ const ProfileMatch = {
               <h4 style="margin:0">① 简历</h4>
               <span class="small muted" id="pm-saved-hint">${this.state.saved ? '✅ 已保存' : '未保存'}</span>
             </div>
-            <div class="dropzone mt12" id="pm-dropzone">点击或拖拽上传 Word / PDF / TXT</div>
+            <div class="dropzone mt12" id="pm-dropzone">点击或拖拽上传 Word(.docx) / PDF / TXT</div>
+            <input type="file" id="pm-file" accept=".txt,.md,.csv,.docx,.pdf" hidden />
             <textarea class="pm-textarea mt12" id="pm-text" placeholder="也可以直接粘贴简历文本（教育经历、专业技能、项目经历、证书…）">${esc(this.state.text)}</textarea>
             <div class="between mt12">
               <button class="btn" id="pm-save">💾 保存简历</button>
@@ -81,12 +82,18 @@ const ProfileMatch = {
       } catch (err) { toast(err.message, 'err'); }
     });
 
-    // 上传文件（Word/PDF/TXT → 文本）
-    bindDropzone(root.querySelector('#pm-dropzone'), async (file) => {
+    // 上传文件（点击：页面内真实隐藏 input，兼容内嵌浏览器；拖拽：drop 事件）
+    const dz = root.querySelector('#pm-dropzone');
+    const fileInput = root.querySelector('#pm-file');
+    const handleFile = async (file) => {
+      if (!file) return;
       try {
         let txt = '';
-        if (/\.(txt|md)$/i.test(file.name)) txt = await readFileText(file);
-        else {
+        if (/\.(txt|md|csv)$/i.test(file.name)) {
+          txt = await readFileText(file);
+          toast(`已读取 ${file.name}（${txt.length} 字）`, 'ok');
+        } else {
+          toast(`正在解析 ${file.name}…`, 'info');
           const b64 = await fileToBase64(file);
           const r = await API.post('/profile/resume', { raw_files: [{ name: file.name, base64: b64 }] });
           toast(`已解析并保存 ${file.name}（${r.chars} 字）`, 'ok');
@@ -95,9 +102,17 @@ const ProfileMatch = {
         }
         this.state.text = txt; this.state.saved = true;
         this.refresh(root);
-        if (/\.(txt|md)$/i.test(file.name)) toast('已读取文件内容', 'ok');
       } catch (err) { toast(err.message, 'err'); }
+    };
+    dz.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      const f = fileInput.files && fileInput.files[0];
+      fileInput.value = '';
+      handleFile(f);
     });
+    dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('over'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+    dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('over'); handleFile(e.dataTransfer.files && e.dataTransfer.files[0]); });
 
     // 文本框输入
     root.querySelector('#pm-text').addEventListener('input', (e) => { this.state.text = e.target.value; });
